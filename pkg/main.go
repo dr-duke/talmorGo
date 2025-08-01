@@ -125,10 +125,12 @@ func handleExpression(message *tgbotapi.Message) {
 	sentMsg, _ := bot.Send(processingMsg)
 
 	var ytDlp = *newYtDlp()
-	ytDlp.setOutputPath("/Users/glebpyanov/Downloads")
-	ytDlp.setOutputType("mkv")
+	ytDlp.setOutputPath(os.Getenv("YT_DLP_OUTPUT_DIR"))
+	ytDlp.setOutputType(os.Getenv("YT_DLP_OUTPUT_FORMAT"))
 	ytDlp.setBinaryPath(os.Getenv("YT_DLP_BINARY"))
-	ytDlp.setProxy(os.Getenv("YT_DLP_PROXY"))
+	if os.Getenv("YT_DLP_PROXY") != "" {
+		ytDlp.setProxy(os.Getenv("YT_DLP_PROXY"))
+	}
 	ytDlp.inputStrings = []string{expr}
 	res := ytDlp.runCommand()
 

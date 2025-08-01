@@ -11,9 +11,12 @@ COPY pkg/* ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/talmor-go
 
 FROM alpine:latest AS runtime
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates ffmpeg
 
 ENV TELEGRAM_BOT_TOKEN=""
+
+ENV YT_DLP_OUTPUT_DIR=/data
+ENV YT_DLP_OUTPUT_FORMAT=mp4
 ENV YT_DLP_PROXY=""
 ENV YT_DLP_BINARY=/app/yt-dlp
 
