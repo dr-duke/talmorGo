@@ -13,7 +13,7 @@ FROM alpine:latest AS runtime
 RUN apk --no-cache add ca-certificates
 
 ENV TELEGRAM_BOT_TOKEN=""
-YT_DLP_PROXY=""
+ENV YT_DLP_PROXY=""
 ENV YT_DLP_BINARY=/usr/local/bin/yt-dlp
 
 COPY --from=builder /pkg/yt-dlp_linux $YT_DLP_BINARY
