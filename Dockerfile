@@ -23,6 +23,6 @@ ENV YT_DLP_BINARY=/app/yt-dlp
 COPY --from=builder /app/bin/* /app/
 
 RUN chmod +x $YT_DLP_BINARY
-LABEL app.version=0.0.1
+LABEL app.version=0.0.1-1
 LABEL app.author=glebpyanov
 ENTRYPOINT ["/app/talmor-go"]

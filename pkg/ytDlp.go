@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/jessevdk/go-flags"
 	"io"
 	"log/slog"
 	"net/url"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -16,50 +18,54 @@ import (
 
 type ytDlp struct {
 	inputStrings       []string
-	binaryPath         string
-	outputPath         string
-	outputType         string
-	proxy              string
+	BinaryPath         string `long:"yt-dlp-binary-path" env:"YT_DLP_BINARY" default:"./yt-dlp"`
+	OutputPath         string `long:"yt-dlp-output-dir" env:"YT_DLP_OUTPUT_DIR" default:"./"`
+	OutputType         string `long:"yt-dlp-output-format" env:"YT_DLP_OUTPUT_FORMAT" default:"mp4"`
+	Proxy              string `long:"yt-dlp-proxy" env:"YT_DLP_PROXY" default:""`
 	defaultParams      []string
 	customParams       []string
-	processingTimeoutS int
+	ProcessingTimeoutS int `long:"yt-dlp-processing-timeout" env:"YT_DLP_PROCESSING_TIMEOUT" default:"300"`
 	queue              [][]string
 }
 
 func newYtDlp() *ytDlp {
-	var result = ytDlp{
-		binaryPath:         "/Users/glebpyanov/Downloads/yt-dlp_macos",
-		processingTimeoutS: 600,
-		defaultParams: []string{
-			"-t", "mp4",
-			"-o", "%(title)s.%(ext)s",
-			"--print", "post_process:filename",
-			"--no-simulate",
-		},
+	var result ytDlp
+	//_, err := flags.ParseArgs(&result, os.Args)
+	parser := flags.NewParser(&result, flags.IgnoreUnknown)
+	_, err := parser.ParseArgs(os.Args)
+	if err != nil {
+		panic(fmt.Sprintf("Error while yt-dlp worker creation: %s", err))
+	}
+	result.defaultParams = []string{
+		"-o", "%(title)s.%(ext)s",
+		"--print", "post_process:filename",
+		"--no-simulate",
+	}
+	if result.Proxy != "" {
+		result.setProxy(result.Proxy)
+	}
+	if result.OutputType != "" {
+		result.setOutputType(result.OutputType)
+	}
+	if result.OutputPath != "" {
+		result.setOutputPath(result.OutputPath)
 	}
 	return &result
 }
 
 func (y *ytDlp) setOutputPath(path string) string {
-	y.outputPath = path
 	y.customParams = append(y.customParams, "-P", path)
-	return y.outputPath
+	return y.OutputPath
 
 }
 func (y *ytDlp) setOutputType(outputType string) string {
-	y.outputType = outputType
 	y.customParams = append(y.customParams, "-t", outputType)
-	return y.outputPath
+	return y.OutputPath
 }
 
-func (y *ytDlp) setBinaryPath(path string) string {
-	y.binaryPath = path
-	return y.binaryPath
-}
-func (y *ytDlp) setProxy(proxyString string) string {
-	y.proxy = proxyString
-	y.customParams = append(y.customParams, "--proxy", y.proxy)
-	return y.proxy
+func (y *ytDlp) setProxy(proxyString string) []string {
+	y.customParams = append(y.customParams, "--proxy", proxyString)
+	return y.customParams
 }
 
 func (y *ytDlp) preProcessing() {
@@ -85,25 +91,24 @@ type CommandResult struct {
 	Error  error
 }
 
-func (y *ytDlp) runCommand() []CommandResult {
+func (y *ytDlp) runCommand() <-chan CommandResult {
 	y.preProcessing()
 	var wg sync.WaitGroup
 	var outputMutex sync.Mutex
-	results := make(chan CommandResult, len(y.queue))
+	results := make(chan CommandResult)
 	for _, downloadItem := range y.queue {
 		wg.Add(1)
 		go func(arguments []string, ch chan<- CommandResult) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(y.processingTimeoutS)*1000*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(y.ProcessingTimeoutS)*1000*time.Millisecond)
 			defer cancel()
-			var destinationFilepath string
 
-			cmd := exec.CommandContext(ctx, y.binaryPath, arguments...)
+			cmd := exec.CommandContext(ctx, y.BinaryPath, arguments...)
 
 			stdout, _ := cmd.StdoutPipe()
 			stderr, _ := cmd.StderrPipe()
 
-			slog.Info(fmt.Sprintf("Running %s %s", y.binaryPath, arguments))
+			slog.Info(fmt.Sprintf("Running %s %s", y.BinaryPath, arguments))
 			if err := cmd.Start(); err != nil {
 				printOutput(&outputMutex, "[ОШИБКА] Не удалось запустить команду: %v\n", err)
 				ch <- CommandResult{
@@ -113,13 +118,16 @@ func (y *ytDlp) runCommand() []CommandResult {
 			}
 			scanner := func(prefix string, reader io.Reader) {
 				scanner := bufio.NewScanner(reader)
-				r, _ := regexp.Compile("^(" + y.outputPath + ").*\\.(\\w{3,5})$")
+				r, _ := regexp.Compile("^(" + y.OutputPath + ").*\\.(\\w{3,5})$")
 				for scanner.Scan() {
 					line := scanner.Text()
 					if r.MatchString(line) {
-						destinationFilepath = line
+						printOutput(&outputMutex, "[Video %s] : %s %s\n", arguments[len(arguments)-1], prefix, line)
+						ch <- CommandResult{
+							Output: line,
+							Error:  nil,
+						}
 					}
-					printOutput(&outputMutex, "[Video %s] : %s %s\n", arguments[len(arguments)-1], prefix, line)
 				}
 			}
 
@@ -131,13 +139,9 @@ func (y *ytDlp) runCommand() []CommandResult {
 			if err := cmd.Wait(); err != nil {
 				printOutput(&outputMutex, "[Команда %d] Завершена с ошибкой: %v\n", arguments[len(arguments)-1], err)
 				ch <- CommandResult{
-					Output: fmt.Sprintf("Processing error %s %s", y.binaryPath, arguments),
+					Output: fmt.Sprintf("Processing error %s %s", y.BinaryPath, arguments),
 					Error:  err,
 				}
-			}
-			ch <- CommandResult{
-				Output: destinationFilepath,
-				Error:  nil,
 			}
 		}(downloadItem, results)
 	}
@@ -147,12 +151,7 @@ func (y *ytDlp) runCommand() []CommandResult {
 		close(results)
 	}()
 
-	//var rError []error
-	var res []CommandResult
-	for result := range results {
-		res = append(res, result)
-	}
-	return res
+	return results
 }
 
 func printOutput(mutex *sync.Mutex, format string, a ...interface{}) {
