@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/jessevdk/go-flags"
 	"io"
-	"log"
 	"log/slog"
 	"net/url"
 	"os"
@@ -95,7 +94,7 @@ type CommandResult struct {
 
 func (y *ytDlp) flushQueue() [][]string {
 	y.queue = [][]string{}
-	log.Printf("ytDlp queue flushed.")
+	slog.Info("ytDlp queue flushed.")
 	return y.queue
 }
 

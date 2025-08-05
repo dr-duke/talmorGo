@@ -5,7 +5,7 @@ import (
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/jessevdk/go-flags"
-	"log"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -53,9 +53,10 @@ func (tgBot *TelegramBotConfig) startHttpServer(port string) {
 	if tgBot.HealthEndpoint != "" {
 		tgBot.startHealthHandler()
 	}
-	log.Printf("Starting http server on port %s", port)
+	slog.Info(fmt.Sprintf("Starting http server on port %s", port))
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Http server failed: %v", err)
+		slog.Error(fmt.Sprintf("Http server start failed: %v", err))
+		panic(err)
 	}
 
 }
@@ -92,7 +93,8 @@ func (tgBot *TelegramBotConfig) telegramUpdateWorker() {
 	var err error
 	tgBot.bot, err = tgbotapi.NewBotAPI(tgBot.BotToken)
 	if err != nil {
-		log.Panic(err)
+		slog.Error(fmt.Sprintf("Failed to create bot, aborting: %v", err))
+		panic(err)
 	}
 
 	for id := 0; id < tgBot.BotWorkerCount; id++ {
@@ -101,7 +103,7 @@ func (tgBot *TelegramBotConfig) telegramUpdateWorker() {
 	}
 
 	tgBot.bot.Debug = tgBot.Debug
-	log.Printf("Authorized on account %s", tgBot.bot.Self.UserName)
+	slog.Info(fmt.Sprintf("Authorized on account %s", tgBot.bot.Self.UserName))
 
 	// Настройка long polling
 	u := tgbotapi.NewUpdate(0)
@@ -110,13 +112,13 @@ func (tgBot *TelegramBotConfig) telegramUpdateWorker() {
 
 	// Обработка входящих сообщений
 	for update := range updates {
-		log.Printf("%v", update.Message)
+		slog.Debug(fmt.Sprintf("Get new message: %v", update.Message))
 		if update.Message != nil {
 			select {
 			case tgBot.taskQueue <- update.Message:
-				log.Printf("Message %d added to queue. Queue len is %v", update.Message.MessageID, len(tgBot.taskQueue))
+				slog.Debug(fmt.Sprintf("Message %d added to queue. Queue len is %v", update.Message.MessageID, len(tgBot.taskQueue)))
 			default:
-				log.Printf("Queue is full, message %d dropped", update.Message.MessageID)
+				slog.Error(fmt.Sprintf("Queue is full, message %d dropped", update.Message.MessageID))
 				tgBot.sendMessage(update.Message, "Queue is full, message dropped", tgbotapi.ModeHTML)
 			}
 		}
@@ -129,7 +131,7 @@ func (tgBot *TelegramBotConfig) telegramUpdateWorker() {
 
 func (tgBot *TelegramBotConfig) isUserAllowed(userID int64) bool {
 	if len(tgBot.AllowedUserIDs) == 0 {
-		log.Printf("‼️ allowedUserIDs variable is not set. Any user will be allowed ")
+		slog.Error("‼️ allowedUserIDs variable is not set. Any user will be allowed ")
 		return true
 	}
 	return slices.Contains(tgBot.AllowedUserIDs, userID)
@@ -137,12 +139,12 @@ func (tgBot *TelegramBotConfig) isUserAllowed(userID int64) bool {
 
 func (tgBot *TelegramBotConfig) worker(id int) {
 	defer tgBot.wg.Done()
-	log.Printf("Worker %d started", id)
+	slog.Debug(fmt.Sprintf("Worker %d started", id))
 
 	for message := range tgBot.taskQueue {
-		log.Printf("Worker %d processing message %d", id, message.MessageID)
+		slog.Debug(fmt.Sprintf("Worker %d processing message %d", id, message.MessageID))
 		if !tgBot.isUserAllowed(message.Chat.ID) {
-			log.Printf(fmt.Sprintf("ChatId is not allowed: %s", message))
+			slog.Error(fmt.Sprintf("ChatId is not allowed: %s", message))
 			tgBot.sendMessage(message, "🛑 This bot is private", tgbotapi.ModeMarkdownV2)
 			return
 		}
@@ -154,7 +156,7 @@ func (tgBot *TelegramBotConfig) worker(id int) {
 		}
 	}
 
-	log.Printf("Worker %d stopped", id)
+	slog.Info(fmt.Sprintf("Worker %d stopped", id))
 }
 
 func (tgBot *TelegramBotConfig) handleCommand(message *tgbotapi.Message) {
@@ -232,7 +234,7 @@ func (tgBot *TelegramBotConfig) sendMessage(message *tgbotapi.Message, text stri
 	msg.DisableNotification = true
 	responseMessage, err := tgBot.bot.Send(msg)
 	if err != nil {
-		log.Printf("Error sending message: %v", err)
+		slog.Error(fmt.Sprintf("Error sending message: %v", err))
 	}
 	return responseMessage, err
 }
