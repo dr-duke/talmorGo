@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"github.com/jessevdk/go-flags"
 	"io"
+	"log"
 	"log/slog"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -30,7 +32,6 @@ type ytDlp struct {
 
 func newYtDlp() *ytDlp {
 	var result ytDlp
-	//_, err := flags.ParseArgs(&result, os.Args)
 	parser := flags.NewParser(&result, flags.IgnoreUnknown)
 	_, err := parser.ParseArgs(os.Args)
 	if err != nil {
@@ -87,12 +88,20 @@ func (y *ytDlp) preProcessing() {
 }
 
 type CommandResult struct {
-	Output string
-	Error  error
+	FileName string
+	Output   string
+	Error    error
+}
+
+func (y *ytDlp) flushQueue() [][]string {
+	y.queue = [][]string{}
+	log.Printf("ytDlp queue flushed.")
+	return y.queue
 }
 
 func (y *ytDlp) runCommand() <-chan CommandResult {
 	y.preProcessing()
+	defer y.flushQueue()
 	var wg sync.WaitGroup
 	var outputMutex sync.Mutex
 	results := make(chan CommandResult)
@@ -100,6 +109,7 @@ func (y *ytDlp) runCommand() <-chan CommandResult {
 		wg.Add(1)
 		go func(arguments []string, ch chan<- CommandResult) {
 			defer wg.Done()
+
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(y.ProcessingTimeoutS)*1000*time.Millisecond)
 			defer cancel()
 
@@ -124,8 +134,9 @@ func (y *ytDlp) runCommand() <-chan CommandResult {
 					if r.MatchString(line) {
 						printOutput(&outputMutex, "[Video %s] : %s %s\n", arguments[len(arguments)-1], prefix, line)
 						ch <- CommandResult{
-							Output: line,
-							Error:  nil,
+							FileName: filepath.Base(line),
+							Output:   line,
+							Error:    nil,
 						}
 					}
 				}

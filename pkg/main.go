@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/jessevdk/go-flags"
 	"log"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -12,21 +14,18 @@ import (
 )
 
 type TelegramBotConfig struct {
-	BotToken         string  `long:"telegram-bot-token" env:"TELEGRAM_BOT_TOKEN" required:"true"`
-	BotWorkerCount   int     `long:"worker-count" env:"WORKER_COUNT" default:"5"`
-	AllowedUserIDs   []int64 `long:"allowed-chatids" env:"ALLOWED_IDS" env-delim:";"`
-	Debug            bool    `long:"bot-debug"`
-	bot              *tgbotapi.BotAPI
-	taskQueue        chan *tgbotapi.Message
-	wg               sync.WaitGroup
-	downloader       ytDlp
-	DownloaderConfig struct {
-		BinaryPath         string `long:"yt-dlp-binary-path" env:"YT_DLP_BINARY" default:"./yt-dlp"`
-		OutputPath         string `long:"yt-dlp-output-dir" env:"YT_DLP_OUTPUT_DIR" default:"./"`
-		OutputType         string `long:"yt-dlp-output-format" env:"YT_DLP_OUTPUT_FORMAT" default:"mp4"`
-		Proxy              string `long:"yt-dlp-proxy" env:"YT_DLP_PROXY" default:""`
-		ProcessingTimeoutS int    `long:"yt-dlp-processing-timeout" env:"YT_DLP_PROCESSING_TIMEOUT" default:"300"`
-	}
+	BotToken             string  `long:"telegram-bot-token" env:"TELEGRAM_BOT_TOKEN" required:"true"`
+	BotWorkerCount       int     `long:"worker-count" env:"WORKER_COUNT" default:"5"`
+	AllowedUserIDs       []int64 `long:"allowed-chatids" env:"ALLOWED_IDS" env-delim:";"`
+	Debug                bool    `long:"bot-debug"`
+	EnableWebPagePreview bool    `long:"bot-web-preview"`
+	HttpPort             string  `long:"http-port" default:"8080"`
+	HealthEndpoint       string  `long:"health-endpoint" default:"/health"`
+	httpMux              *http.ServeMux
+	bot                  *tgbotapi.BotAPI
+	taskQueue            chan *tgbotapi.Message
+	wg                   sync.WaitGroup
+	downloader           ytDlp
 }
 
 func main() {
@@ -36,84 +35,129 @@ func main() {
 	if err != nil {
 		panic(fmt.Sprintf("Error while parsing configuration, %s", err))
 	}
+	if telegramBot.HttpPort != "" {
+		go telegramBot.startHttpServer(telegramBot.HttpPort)
+	}
 
 	telegramBot.telegramUpdateWorker()
 }
 
-func (config *TelegramBotConfig) telegramUpdateWorker() {
-	config.taskQueue = make(chan *tgbotapi.Message, 100)
-	config.downloader = *newYtDlp()
+func (tgBot *TelegramBotConfig) startHttpServer(port string) {
+	tgBot.httpMux = http.NewServeMux()
+
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: tgBot.httpMux,
+	}
+	defer server.Close()
+	if tgBot.HealthEndpoint != "" {
+		tgBot.startHealthHandler()
+	}
+	log.Printf("Starting http server on port %s", port)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("Http server failed: %v", err)
+	}
+
+}
+
+func (tgBot *TelegramBotConfig) startHealthHandler() {
+	tgBot.httpMux.HandleFunc(tgBot.HealthEndpoint, tgBot.healthHandler)
+}
+
+func (tgBot *TelegramBotConfig) healthHandler(w http.ResponseWriter, r *http.Request) {
+	status := "OK"
+	code := http.StatusOK
+	if !tgBot.health() {
+		status = "Fail"
+		code = http.StatusInternalServerError
+	}
+	response := status
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(response)
+}
+
+func (tgBot *TelegramBotConfig) health() bool {
+	if _, err := tgBot.bot.GetMe(); err == nil {
+		return true
+	} else {
+		return false
+	}
+}
+
+func (tgBot *TelegramBotConfig) telegramUpdateWorker() {
+	tgBot.taskQueue = make(chan *tgbotapi.Message, 100)
+	tgBot.downloader = *newYtDlp()
 
 	var err error
-	config.bot, err = tgbotapi.NewBotAPI(config.BotToken)
+	tgBot.bot, err = tgbotapi.NewBotAPI(tgBot.BotToken)
 	if err != nil {
 		log.Panic(err)
 	}
 
-	for id := 0; id < config.BotWorkerCount; id++ {
-		config.wg.Add(1)
-		go config.worker(id)
+	for id := 0; id < tgBot.BotWorkerCount; id++ {
+		tgBot.wg.Add(1)
+		go tgBot.worker(id)
 	}
 
-	config.bot.Debug = config.Debug
-	log.Printf("Authorized on account %s", config.bot.Self.UserName)
+	tgBot.bot.Debug = tgBot.Debug
+	log.Printf("Authorized on account %s", tgBot.bot.Self.UserName)
 
 	// Настройка long polling
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
-	updates := config.bot.GetUpdatesChan(u)
+	updates := tgBot.bot.GetUpdatesChan(u)
 
 	// Обработка входящих сообщений
 	for update := range updates {
 		log.Printf("%v", update.Message)
 		if update.Message != nil {
 			select {
-			case config.taskQueue <- update.Message:
-				log.Printf("Message %d added to queue", update.Message.MessageID)
+			case tgBot.taskQueue <- update.Message:
+				log.Printf("Message %d added to queue. Queue len is %v", update.Message.MessageID, len(tgBot.taskQueue))
 			default:
 				log.Printf("Queue is full, message %d dropped", update.Message.MessageID)
-				config.sendMessage(update.Message, "Queue is full, message dropped")
+				tgBot.sendMessage(update.Message, "Queue is full, message dropped", tgbotapi.ModeHTML)
 			}
 		}
 	}
 
 	// Ожидание завершения всех воркеров
-	close(config.taskQueue)
-	config.wg.Wait()
+	close(tgBot.taskQueue)
+	tgBot.wg.Wait()
 }
 
-func (config *TelegramBotConfig) isUserAllowed(userID int64) bool {
-	// Если нет ограничений - разрешаем всем
-	if len(config.AllowedUserIDs) == 0 {
+func (tgBot *TelegramBotConfig) isUserAllowed(userID int64) bool {
+	if len(tgBot.AllowedUserIDs) == 0 {
 		log.Printf("‼️ allowedUserIDs variable is not set. Any user will be allowed ")
 		return true
 	}
-	return slices.Contains(config.AllowedUserIDs, userID)
+	return slices.Contains(tgBot.AllowedUserIDs, userID)
 }
 
-func (config *TelegramBotConfig) worker(id int) {
-	defer config.wg.Done()
+func (tgBot *TelegramBotConfig) worker(id int) {
+	defer tgBot.wg.Done()
 	log.Printf("Worker %d started", id)
 
-	for message := range config.taskQueue {
+	for message := range tgBot.taskQueue {
 		log.Printf("Worker %d processing message %d", id, message.MessageID)
-		if !config.isUserAllowed(message.Chat.ID) {
+		if !tgBot.isUserAllowed(message.Chat.ID) {
 			log.Printf(fmt.Sprintf("ChatId is not allowed: %s", message))
-			config.sendMessage(message, "🛑 This bot is private")
+			tgBot.sendMessage(message, "🛑 This bot is private", tgbotapi.ModeMarkdownV2)
 			return
 		}
 		if message.IsCommand() {
-			config.handleCommand(message)
+			tgBot.handleCommand(message)
 
 		} else {
-			config.handleExpression(message)
+			tgBot.handleExpression(message)
 		}
 	}
 
 	log.Printf("Worker %d stopped", id)
 }
 
-func (config *TelegramBotConfig) handleCommand(message *tgbotapi.Message) {
+func (tgBot *TelegramBotConfig) handleCommand(message *tgbotapi.Message) {
 	var response string
 	switch message.Command() {
 	case "start":
@@ -125,80 +169,88 @@ func (config *TelegramBotConfig) handleCommand(message *tgbotapi.Message) {
 			"✅ Можно отправить несколько ссылок через пробел.\n\n" +
 			"❌ Ограничения:\n- Прервать скачивание нельзя. Все добавленое будет скачано или умрет в процессе по достижению ⏲️ таймаута"
 	case "status":
-		response = fmt.Sprintf("Статус системы:\n- Сообщений в очереди: %d\n- Активных воркеров: %d", len(config.taskQueue), config.BotWorkerCount)
+		response = fmt.Sprintf("Статус системы:\n- Сообщений в очереди: %d\n- Активных воркеров: %d", len(tgBot.taskQueue), tgBot.BotWorkerCount)
 	default:
 		response = "Неизвестная команда"
 	}
-	config.sendMessage(message, response)
+	tgBot.sendMessage(message, response, tgbotapi.ModeMarkdownV2)
 
 }
 
-func (config *TelegramBotConfig) handleExpression(message *tgbotapi.Message) {
-	//startTime := time.Now()
+func (tgBot *TelegramBotConfig) handleExpression(message *tgbotapi.Message) {
 	expr := strings.TrimSpace(message.Text)
 	if expr == "" {
 		return
 	}
 
-	config.downloader.inputStrings = []string{expr}
-	config.progressResponder(config.downloader.runCommand(), message)
+	tgBot.downloader.inputStrings = []string{expr}
+	tgBot.progressResponder(tgBot.downloader.runCommand(), message)
 
 }
 
-func (config *TelegramBotConfig) progressResponder(ch <-chan CommandResult, message *tgbotapi.Message) {
+func (tgBot *TelegramBotConfig) progressResponder(ch <-chan CommandResult, message *tgbotapi.Message) {
 	var str []string
 	startTime := time.Now()
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	progressMessage, _ := config.sendMessage(message, "⏳ Качаю, качаю, ожидайте\n`\n--+--+--+--+--+\n`")
+	progressMessage, _ := tgBot.sendMessage(message, "⏳ Качаю, качаю, ожидайте\n<code>\n--+--+--+--+--+\n</code>", tgbotapi.ModeHTML)
 
 	for {
 		select {
 		case value, ok := <-ch:
 			if !ok {
-				config.updateMessage(&progressMessage, fmt.Sprintf("🏁 Результат:\n`\n%v\n`", strings.Join(str, "\n")))
+				tgBot.updateMessage(&progressMessage, fmt.Sprintf("🏁 Результат:\n<code>\n%v\n</code>", strings.Join(str, "\n")), tgbotapi.ModeHTML)
 				return
 			}
 			var itemPrefix = "✔️"
 			if value.Error != nil {
-				itemPrefix = "❌"
+				itemPrefix = fmt.Sprintf("❌ %s", value.Output)
 			}
-			str = append(str, fmt.Sprintf("%s %s\n", itemPrefix, value.Output))
-			config.updateMessage(&progressMessage, fmt.Sprintf("⏳ Качаю, качаю, ожидайте\n`\n%v\n`", strings.Join(str, "\n")))
+			str = append(str, fmt.Sprintf("%s %s\n", itemPrefix, value.FileName))
+			tgBot.updateMessage(&progressMessage, fmt.Sprintf("⏳ Качаю, качаю, ожидайте\n<code>\n%v\n</code>", strings.Join(str, "\n")), tgbotapi.ModeHTML)
 
 		case <-ticker.C:
 			processingTime := time.Since(startTime).Round(time.Second)
 			if len(str) == 0 {
 				if processingTime%3 == 0 {
-					config.updateMessage(&progressMessage, fmt.Sprintf("⏳ Качаю, качаю, ожидайте\n`\n%v\n`", "+--+--+--+--+--"))
+					tgBot.updateMessage(&progressMessage, fmt.Sprintf("⏳ Качаю, качаю, ожидайте\n<code>\n%v\n</code>", "+--+--+--+--+--"), tgbotapi.ModeHTML)
 				} else if processingTime%3 == 1 {
-					config.updateMessage(&progressMessage, fmt.Sprintf("⏳ Качаю, качаю, ожидайте\n`\n%v\n`", "-+--+--+--+--+-"))
+					tgBot.updateMessage(&progressMessage, fmt.Sprintf("⏳ Качаю, качаю, ожидайте\n<code>\n%v\n</code>", "-+--+--+--+--+-"), tgbotapi.ModeHTML)
 				} else {
-					config.updateMessage(&progressMessage, fmt.Sprintf("⏳ Качаю, качаю, ожидайте\n`\n%v\n`", "--+--+--+--+--+"))
+					tgBot.updateMessage(&progressMessage, fmt.Sprintf("⏳ Качаю, качаю, ожидайте\n<code>\n%v\n</code>", "--+--+--+--+--+"), tgbotapi.ModeHTML)
 				}
 			}
 		}
 	}
 }
 
-func (config *TelegramBotConfig) sendMessage(message *tgbotapi.Message, text string) (tgbotapi.Message, error) {
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	msg.ParseMode = tgbotapi.ModeMarkdownV2
+func (tgBot *TelegramBotConfig) sendMessage(message *tgbotapi.Message, text string, parseMode string) (tgbotapi.Message, error) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, tgBot.escapeMessageText(parseMode, text))
+	msg.ParseMode = parseMode
 	msg.DisableWebPagePreview = true
 	msg.DisableNotification = true
-	responseMessage, err := config.bot.Send(msg)
-	log.Printf("Message: %s\nBot: %s", text, config.bot)
+	responseMessage, err := tgBot.bot.Send(msg)
 	if err != nil {
 		log.Printf("Error sending message: %v", err)
 	}
 	return responseMessage, err
 }
 
-func (config *TelegramBotConfig) updateMessage(message *tgbotapi.Message, text string) (tgbotapi.Message, error) {
-	msg := tgbotapi.NewEditMessageText(message.Chat.ID, message.MessageID, text)
-	msg.ParseMode = tgbotapi.ModeMarkdownV2
-	msg.DisableWebPagePreview = true
-	updatedMsg, err := config.bot.Send(msg)
+func (tgBot *TelegramBotConfig) updateMessage(message *tgbotapi.Message, text string, parseMode string) (tgbotapi.Message, error) {
+	msg := tgbotapi.NewEditMessageText(message.Chat.ID, message.MessageID, tgBot.escapeMessageText(parseMode, text))
+	msg.ParseMode = parseMode
+	msg.DisableWebPagePreview = tgBot.EnableWebPagePreview
+	updatedMsg, err := tgBot.bot.Send(msg)
 	return updatedMsg, err
+}
+
+func (tgBot *TelegramBotConfig) escapeMessageText(parseMode string, text string) string {
+	var msgText string
+	if parseMode == tgbotapi.ModeMarkdownV2 {
+		msgText = tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, text)
+	} else {
+		msgText = text
+	}
+	return msgText
 }
