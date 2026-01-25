@@ -5,7 +5,7 @@ RUN apk add --no-cache git ca-certificates
 
 WORKDIR /talmorGo
 RUN mkdir -p /app/bin/ && \
-    wget -O /app/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/download/2025.07.21/yt-dlp_linux
+    wget -O /app/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/download/2025.12.08/yt-dlp_linux
 
 COPY pkg/* ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/talmor-go
