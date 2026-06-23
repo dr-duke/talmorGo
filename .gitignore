@@ -1,2 +1,7 @@
 .idea
 test.go
+CLAUDE.md
+*.env
+.env*
+# k8s/Helm values с секретами — не коммитим
+50-values.yml.j2

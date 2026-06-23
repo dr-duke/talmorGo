@@ -1,0 +1,5 @@
+ALTER TABLE files ADD COLUMN deleted_at TEXT;
+
+ALTER TABLE jobs ADD COLUMN retry_count    INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN next_retry_at  TEXT;
+ALTER TABLE jobs ADD COLUMN first_failed_at TEXT;

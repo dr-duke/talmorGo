@@ -1,0 +1,32 @@
+services:
+  talmor:
+    image: ghcr.io/dr-duke/talmorgo:latest
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /path/to/jellyfin/media:/data
+    environment:
+      # Обязательные
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      BASE_URL: "${BASE_URL:-http://localhost:8080}"
+
+      # Безопасность
+      TELEGRAM_ALLOWED_IDS: "${TELEGRAM_ALLOWED_IDS:-}"
+      WEB_TOKEN: "${WEB_TOKEN:-}"
+
+      # Прокси (если нужны)
+      TELEGRAM_PROXY: "${TELEGRAM_PROXY:-}"
+      YT_DLP_PROXY: "${YT_DLP_PROXY:-}"
+
+      # Загрузчик
+      YT_DLP_TIMEOUT: "${YT_DLP_TIMEOUT:-300}"
+      YT_DLP_OUTPUT_FORMAT: "${YT_DLP_OUTPUT_FORMAT:-mp4}"
+      YT_DLP_EXTRA_ARGS: "${YT_DLP_EXTRA_ARGS:-}"
+      WORKER_COUNT: "${WORKER_COUNT:-2}"
+
+      # Пути (внутри контейнера)
+      YT_DLP_BINARY: /app/yt-dlp
+      YT_DLP_OUTPUT_DIR: /data
+      DB_PATH: /data/talmor.db

@@ -1,0 +1,43 @@
+package templates
+
+templ Index() {
+	@Layout("Главная") {
+		<nav class="tabs" id="tab-nav">
+			<button
+				class="tab-btn active"
+				id="tab-queue"
+				hx-get="/queue"
+				hx-target="#content"
+				hx-swap="innerHTML"
+				onclick="switchTab('queue')"
+			>📋 Очередь</button>
+			<button
+				class="tab-btn"
+				id="tab-files"
+				hx-get="/files"
+				hx-target="#content"
+				hx-swap="innerHTML"
+				onclick="switchTab('files')"
+			>📁 Файлы</button>
+		</nav>
+		<div
+			id="content"
+			hx-get="/queue"
+			hx-trigger="load"
+			hx-swap="innerHTML"
+		></div>
+		<script>
+			function switchTab(name) {
+				document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+				document.getElementById('tab-' + name).classList.add('active');
+			}
+			// Восстанавливаем активную вкладку при HTMX-навигации
+			document.body.addEventListener('htmx:afterRequest', function(evt) {
+				var url = evt.detail.requestConfig && evt.detail.requestConfig.path;
+				if (!url) return;
+				if (url.includes('/files')) switchTab('files');
+				else if (url.includes('/queue')) switchTab('queue');
+			});
+		</script>
+	}
+}

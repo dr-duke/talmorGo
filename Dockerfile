@@ -1,28 +1,47 @@
-# Этап сборки (builder)
-FROM golang:1.24-alpine AS builder
+# ---------- builder ----------
+FROM golang:1.23-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates
+RUN apk add --no-cache git ca-certificates curl
 
-WORKDIR /talmorGo
-RUN mkdir -p /app/bin/ && \
-    wget -O /app/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/download/2025.12.08/yt-dlp_linux
+WORKDIR /src
 
-COPY pkg/* ./
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/talmor-go
+# templ для кодогенерации шаблонов
+RUN go install github.com/a-h/templ/cmd/templ@v0.3.887
 
-FROM alpine:latest AS runtime
-RUN apk --no-cache add ca-certificates ffmpeg
+# Зависимости (кешируются отдельно)
+COPY go.mod go.sum ./
+RUN go mod download
 
-ENV TELEGRAM_BOT_TOKEN=""
+# Исходники
+COPY . .
 
-ENV YT_DLP_OUTPUT_DIR=/data
-ENV YT_DLP_OUTPUT_FORMAT=mp4
-ENV YT_DLP_PROXY=""
-ENV YT_DLP_BINARY=/app/yt-dlp
+# Генерируем Go-код из .templ файлов
+RUN templ generate ./web/templates/...
 
-COPY --from=builder /app/bin/* /app/
-EXPOSE 8080/tcp
-RUN chmod +x $YT_DLP_BINARY
-LABEL app.version=0.0.1-1
-LABEL app.author=glebpyanov
-ENTRYPOINT ["/app/talmor-go"]
+# Собираем бинарь (CGO не нужен — modernc.org/sqlite)
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /app/talmor ./cmd/talmor
+
+# ---------- runtime ----------
+FROM alpine:3.20
+
+# python3 нужен для yt-dlp; ffmpeg для конвертации видео
+RUN apk --no-cache add ca-certificates ffmpeg tzdata python3 py3-pip && \
+    pip3 install --break-system-packages yt-dlp
+
+ENV TZ=Europe/Moscow
+
+RUN mkdir -p /data
+VOLUME ["/data"]
+
+COPY --from=builder /app/talmor /app/talmor
+
+# yt-dlp установлен pip в /usr/bin/yt-dlp
+ENV YT_DLP_BINARY=/usr/bin/yt-dlp \
+    YT_DLP_OUTPUT_DIR=/data \
+    YT_DLP_OUTPUT_FORMAT=mp4 \
+    DB_PATH=/data/talmor.db \
+    HTTP_PORT=8080
+
+EXPOSE 8080
+
+ENTRYPOINT ["/app/talmor"]

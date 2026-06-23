@@ -1,0 +1,211 @@
+package templates
+
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="ru">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<title>{ title } — TalmorGo</title>
+			<link rel="stylesheet" href="/static/plyr.min.css"/>
+			<script src="/static/htmx.min.js"></script>
+			<script src="/static/plyr.min.js"></script>
+			<style>
+				*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+				:root {
+					--bg:       #1c1c1e;
+					--surface:  #2c2c2e;
+					--surface2: #3a3a3c;
+					--border:   #48484a;
+					--text:     #f2f2f7;
+					--muted:    #98989f;
+					--accent:   #636366;
+				}
+				html, body { height: 100%; }
+				body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+
+				/* ── Header ── */
+				header {
+					display: flex; align-items: center; gap: .6rem;
+					padding: .75rem 1rem; border-bottom: 1px solid var(--border);
+					position: sticky; top: 0; z-index: 10; background: var(--bg);
+				}
+				header .logo { font-size: 1.25rem; font-weight: 600; }
+
+				/* ── Tabs ── */
+				.tabs {
+					display: flex; gap: 2px; padding: .5rem 1rem;
+					border-bottom: 1px solid var(--border); background: var(--bg);
+					position: sticky; top: 49px; z-index: 9;
+				}
+				.tab-btn {
+					background: transparent; border: none; color: var(--muted);
+					padding: .45rem .85rem; border-radius: .5rem; cursor: pointer;
+					font-size: .875rem; font-weight: 500; transition: background .15s, color .15s;
+					display: flex; align-items: center; gap: .35rem;
+					min-height: 36px;
+				}
+				.tab-btn:hover { background: var(--surface); color: var(--text); }
+				.tab-btn.active { background: var(--surface2); color: var(--text); }
+
+				/* ── Content area ── */
+				#content { padding: 1rem; max-width: 900px; margin: 0 auto; }
+
+				/* ── Form ── */
+				.add-form { display: flex; gap: .5rem; margin-bottom: 1rem; }
+				.add-form input {
+					flex: 1; background: var(--surface); border: 1px solid var(--border);
+					border-radius: .5rem; padding: .55rem .75rem; color: var(--text);
+					font-size: .9rem; outline: none; min-width: 0;
+				}
+				.add-form input:focus { border-color: var(--accent); }
+
+				/* ── Buttons ── */
+				button, .btn {
+					background: var(--surface2); color: var(--text); border: none;
+					border-radius: .5rem; padding: .5rem .9rem; cursor: pointer;
+					font-size: .85rem; white-space: nowrap; transition: background .15s;
+					min-height: 36px;
+				}
+				button:hover, .btn:hover { background: var(--accent); }
+				button.primary { background: #3a3a3c; }
+				button.primary:hover { background: #48484a; }
+				button.danger { background: #4c1c1c; color: #ff6b6b; }
+				button.danger:hover { background: #6b2020; }
+				button.ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+				button.ghost:hover { background: var(--surface); color: var(--text); }
+				button.secondary { background: var(--surface); color: var(--muted); }
+				button.secondary:hover { background: var(--surface2); color: var(--text); }
+
+				/* ── Search ── */
+				.search-row { margin-bottom: .75rem; }
+				.search-row input {
+					width: 100%; background: var(--surface); border: 1px solid var(--border);
+					border-radius: .5rem; padding: .5rem .75rem; color: var(--text);
+					font-size: .875rem; outline: none;
+				}
+				.search-row input:focus { border-color: var(--accent); }
+
+				/* ── Table ── */
+				table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+				th {
+					text-align: left; color: var(--muted); font-weight: 500;
+					padding: .4rem .5rem; border-bottom: 1px solid var(--border);
+					font-size: .8rem; text-transform: uppercase; letter-spacing: .04em;
+				}
+				td { padding: .55rem .5rem; border-bottom: 1px solid var(--surface); vertical-align: middle; }
+				tr:last-child td { border-bottom: none; }
+				tr:hover td { background: var(--surface); }
+
+				/* ── Badges ── */
+				.badge {
+					display: inline-flex; align-items: center; gap: .25rem;
+					font-size: .72rem; padding: .15rem .5rem;
+					border-radius: 9999px; font-weight: 500; white-space: nowrap;
+				}
+				.badge-pending  { background: #1c2d42; color: #7eb8f7; }
+				.badge-running  { background: #122d1e; color: #5ecc8a; }
+				.badge-retrying { background: #2d1a0a; color: #f5a05a; }
+				.badge-done     { background: #0e2312; color: #7bcf95; }
+				.badge-failed   { background: #2d0f0f; color: #f77; }
+
+				/* ── Actions ── */
+				.actions { display: flex; gap: .3rem; align-items: center; }
+				.name-cell { font-size: .875rem; }
+				.url-cell {
+					max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+					white-space: nowrap; color: var(--muted); font-size: .8rem;
+				}
+				.size-cell { white-space: nowrap; color: var(--muted); font-size: .8rem; }
+
+				/* ── Empty state ── */
+				.empty { color: var(--muted); text-align: center; padding: 2.5rem 1rem; font-size: .9rem; }
+
+				/* ── Player dialog (popup) ── */
+				dialog#player-dialog {
+					background: #000; border: none; border-radius: .75rem;
+					padding: 0; width: min(92vw, 860px); max-height: 92vh;
+					overflow: hidden; margin: auto;
+				}
+				dialog#player-dialog::backdrop { background: rgba(0,0,0,.8); }
+				.player-header {
+					display: flex; justify-content: space-between; align-items: center;
+					padding: .5rem .75rem; background: #111; color: var(--text);
+				}
+				.player-title { font-size: .875rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+				.player-close { background: transparent; border: none; color: var(--muted); font-size: 1.2rem; cursor: pointer; padding: .2rem .4rem; }
+				.player-close:hover { color: var(--text); background: transparent; }
+
+				/* ── Mobile ── */
+				@media (max-width: 600px) {
+					header { padding: .6rem .75rem; }
+					.tabs { padding: .4rem .75rem; top: 45px; }
+					#content { padding: .75rem; }
+					.add-form { flex-wrap: wrap; }
+					.add-form input { min-width: 100%; }
+					th:nth-child(2), td:nth-child(2) { display: none; } /* скрываем размер */
+					.url-cell { max-width: 140px; }
+					button, .btn { padding: .45rem .7rem; }
+				}
+			</style>
+		</head>
+		<body>
+			<header>
+				<span>🎬</span>
+				<span class="logo">TalmorGo</span>
+			</header>
+			{ children... }
+			<!-- Plyr popup dialog -->
+			<dialog id="player-dialog">
+				<div class="player-header">
+					<span class="player-title" id="player-title"></span>
+					<button class="player-close" onclick="closePlayer()">✕</button>
+				</div>
+				<video id="plyr-video" playsinline></video>
+			</dialog>
+			<script>
+				var plyrInstance;
+				document.addEventListener('DOMContentLoaded', function() {
+					plyrInstance = new Plyr('#plyr-video', {
+						controls: ['play-large','play','progress','current-time','duration','mute','volume','fullscreen'],
+						ratio: '16:9',
+					});
+				});
+				function openPlayer(src, title) {
+					document.getElementById('player-title').textContent = title;
+					plyrInstance.source = { type: 'video', sources: [{ src: src, type: 'video/mp4' }] };
+					document.getElementById('player-dialog').showModal();
+					plyrInstance.play();
+				}
+				function closePlayer() {
+					plyrInstance.pause();
+					document.getElementById('player-dialog').close();
+				}
+				document.getElementById('player-dialog').addEventListener('click', function(e) {
+					if (e.target === this) closePlayer();
+				});
+				function renameFile(id, newName) {
+					fetch('/files/' + id, {
+						method: 'PATCH',
+						headers: {'Content-Type': 'application/json'},
+						body: JSON.stringify({name: newName}),
+					}).then(function() { htmx.trigger(document.getElementById('files-inner'), 'load'); });
+				}
+				function renamePrompt(id, name) {
+					var n = prompt('Новое имя:', name);
+					if (n && n.trim()) renameFile(id, n.trim());
+				}
+				function copyPresigned(id, btn) {
+					fetch('/files/' + id + '/link', {method: 'POST'})
+						.then(function(r) { return r.json(); })
+						.then(function(d) {
+							navigator.clipboard.writeText(d.url).then(function() {
+								btn.textContent = '✓';
+								setTimeout(function() { btn.textContent = '🔗'; }, 1500);
+							});
+						});
+				}
+			</script>
+		</body>
+	</html>
+}
