@@ -35,7 +35,7 @@ func QueueTab(jobs []*model.Job) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!-- add-form --><form class=\"add-form\" hx-post=\"/queue\" hx-target=\"#queue-inner\" hx-swap=\"outerHTML\"><input type=\"url\" name=\"url\" placeholder=\"Вставьте ссылку на видео…\" autocomplete=\"off\" required> <button type=\"submit\" class=\"primary\">Скачать</button></form><!-- search --><div class=\"search-row\"><input type=\"search\" id=\"queue-search\" placeholder=\"Поиск по URL, имени, домену…\" oninput=\"filterQueue(this.value)\"></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!-- add-form --><form class=\"add-form\" hx-post=\"queue\" hx-target=\"#queue-inner\" hx-swap=\"outerHTML\"><input type=\"url\" name=\"url\" placeholder=\"Вставьте ссылку на видео…\" autocomplete=\"off\" required> <button type=\"submit\" class=\"primary\">Скачать</button></form><!-- search --><div class=\"search-row\"><input type=\"search\" id=\"queue-search\" placeholder=\"Поиск по URL, имени, домену…\" oninput=\"filterQueue(this.value)\"></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -72,7 +72,7 @@ func QueueList(jobs []*model.Job) templ.Component {
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div id=\"queue-inner\" hx-get=\"/queue/list\" hx-trigger=\"every 4s\" hx-swap=\"outerHTML\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div id=\"queue-inner\" hx-get=\"queue/list\" hx-trigger=\"every 4s\" hx-swap=\"outerHTML\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -158,9 +158,9 @@ func QueueList(jobs []*model.Job) templ.Component {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var8 string
-					templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/queue/%s", j.ID))
+					templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("queue/%s", j.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/queue.templ`, Line: 78, Col: 52}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/queue.templ`, Line: 78, Col: 51}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 					if templ_7745c5c3_Err != nil {
@@ -222,9 +222,9 @@ func QueueList(jobs []*model.Job) templ.Component {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var12 string
-					templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/jobs/%s/retry", j.ID))
+					templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("jobs/%s/retry", j.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/queue.templ`, Line: 95, Col: 55}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/queue.templ`, Line: 95, Col: 54}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 					if templ_7745c5c3_Err != nil {

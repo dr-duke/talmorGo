@@ -3,6 +3,7 @@ package api
 import (
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/api/handler"
@@ -26,33 +27,36 @@ func New(
 	store *storage.Storage,
 	pool handler.Enqueuer,
 ) *Server {
+	// basePath — нормализованный префикс без trailing slash (напр. "/talmor" или "").
+	basePath := strings.TrimRight(cfg.BasePath, "/")
+
 	mux := http.NewServeMux()
 
 	qh := &handler.QueueHandler{Jobs: jobs, Pool: pool}
 	fh := &handler.FilesHandler{Files: files, Tokens: tokens, Storage: store, BaseURL: cfg.BaseURL}
 	lh := &handler.LinkHandler{Tokens: tokens, Files: files}
 
-	// Статика (htmx и прочее).
+	// Статика.
 	staticSub, _ := fs.Sub(web.StaticFiles, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 
-	// Главная страница.
+	// Главная страница — передаём basePath шаблону для <base href>.
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		templ.Handler(templates.Index()).ServeHTTP(w, r)
+		templ.Handler(templates.Index(basePath)).ServeHTTP(w, r)
 	})
 
-	// Queue — /queue (полный tab), /queue/list (polling-фрагмент)
+	// Queue
 	mux.HandleFunc("GET /queue", qh.Page)
 	mux.HandleFunc("GET /queue/list", qh.List)
 	mux.HandleFunc("POST /queue", qh.Add)
 	mux.HandleFunc("DELETE /queue/{id}", qh.Delete)
 	mux.HandleFunc("POST /jobs/{id}/retry", qh.Retry)
 
-	// Files — /files (полный tab), /files/list (polling-фрагмент)
+	// Files
 	mux.HandleFunc("GET /files", fh.Page)
 	mux.HandleFunc("GET /files/list", fh.List)
 	mux.HandleFunc("GET /files/deleted", fh.ListDeleted)
@@ -74,6 +78,18 @@ func New(
 		h = authMiddleware(cfg.WebToken, mux)
 	}
 
+	// Если задан basePath, оборачиваем: внешний mux снимает префикс и отдаёт внутреннему.
+	if basePath != "" {
+		outer := http.NewServeMux()
+		// Редирект /talmor → /talmor/
+		outer.HandleFunc("GET "+basePath, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, basePath+"/", http.StatusMovedPermanently)
+		})
+		// Все запросы /talmor/* — снимаем prefix и передаём внутреннему handler.
+		outer.Handle(basePath+"/", http.StripPrefix(basePath, h))
+		h = outer
+	}
+
 	return &Server{cfg: cfg, handler: h}
 }
 
@@ -84,7 +100,7 @@ func (s *Server) Handler() http.Handler {
 func authMiddleware(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Presigned-ссылки публичны.
-		if len(r.URL.Path) > 3 && r.URL.Path[:3] == "/f/" {
+		if strings.HasPrefix(r.URL.Path, "/f/") {
 			next.ServeHTTP(w, r)
 			return
 		}

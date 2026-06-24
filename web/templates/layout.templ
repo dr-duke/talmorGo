@@ -1,15 +1,26 @@
 package templates
 
-templ Layout(title string) {
+// baseHref вычисляет значение href для тега <base>.
+// При basePath="/talmor" → "/talmor/", при пустом → "/".
+func baseHref(basePath string) string {
+	if basePath == "" {
+		return "/"
+	}
+	return basePath + "/"
+}
+
+templ Layout(title string, basePath string) {
 	<!DOCTYPE html>
 	<html lang="ru">
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<title>{ title } — TalmorGo</title>
-			<link rel="stylesheet" href="/static/plyr.min.css"/>
-			<script src="/static/htmx.min.js"></script>
-			<script src="/static/plyr.min.js"></script>
+			<!-- base href позволяет использовать относительные URL при любом basePath -->
+			<base href={ baseHref(basePath) }/>
+			<link rel="stylesheet" href="static/plyr.min.css"/>
+			<script src="static/htmx.min.js"></script>
+			<script src="static/plyr.min.js"></script>
 			<style>
 				*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 				:root {
@@ -185,18 +196,20 @@ templ Layout(title string) {
 					if (e.target === this) closePlayer();
 				});
 				function renameFile(id, newName) {
-					fetch('/files/' + id, {
+					fetch('files/' + id, {
 						method: 'PATCH',
 						headers: {'Content-Type': 'application/json'},
 						body: JSON.stringify({name: newName}),
-					}).then(function() { htmx.trigger(document.getElementById('files-inner'), 'load'); });
+					}).then(function() {
+						htmx.ajax('GET', 'files/list', {target: '#files-inner', swap: 'outerHTML'});
+					});
 				}
 				function renamePrompt(id, name) {
 					var n = prompt('Новое имя:', name);
 					if (n && n.trim()) renameFile(id, n.trim());
 				}
 				function copyPresigned(id, btn) {
-					fetch('/files/' + id + '/link', {method: 'POST'})
+					fetch('files/' + id + '/link', {method: 'POST'})
 						.then(function(r) { return r.json(); })
 						.then(function(d) {
 							navigator.clipboard.writeText(d.url).then(function() {

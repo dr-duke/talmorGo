@@ -14,6 +14,9 @@ type Config struct {
 	HTTPPort       string `long:"http-port" env:"HTTP_PORT" default:"8080"`
 	HTTPHost       string `long:"http-host" env:"HTTP_HOST" default:""`
 	BaseURL        string `long:"base-url" env:"BASE_URL"`
+	// BasePath — префикс пути, если приложение смонтировано не в корне (напр. /talmor).
+	// Ingress передаёт запросы с полным путём; приложение само снимает префикс.
+	BasePath       string `long:"base-path" env:"BASE_PATH" default:""`
 	HealthEndpoint string `long:"health-endpoint" env:"HEALTH_ENDPOINT" default:"/health"`
 	WebToken       string `long:"web-token" env:"WEB_TOKEN"`
 

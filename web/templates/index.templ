@@ -1,12 +1,12 @@
 package templates
 
-templ Index() {
-	@Layout("Главная") {
+templ Index(basePath string) {
+	@Layout("Главная", basePath) {
 		<nav class="tabs" id="tab-nav">
 			<button
 				class="tab-btn active"
 				id="tab-queue"
-				hx-get="/queue"
+				hx-get="queue"
 				hx-target="#content"
 				hx-swap="innerHTML"
 				onclick="switchTab('queue')"
@@ -14,7 +14,7 @@ templ Index() {
 			<button
 				class="tab-btn"
 				id="tab-files"
-				hx-get="/files"
+				hx-get="files"
 				hx-target="#content"
 				hx-swap="innerHTML"
 				onclick="switchTab('files')"
@@ -22,7 +22,7 @@ templ Index() {
 		</nav>
 		<div
 			id="content"
-			hx-get="/queue"
+			hx-get="queue"
 			hx-trigger="load"
 			hx-swap="innerHTML"
 		></div>
@@ -31,7 +31,6 @@ templ Index() {
 				document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
 				document.getElementById('tab-' + name).classList.add('active');
 			}
-			// Восстанавливаем активную вкладку при HTMX-навигации
 			document.body.addEventListener('htmx:afterRequest', function(evt) {
 				var url = evt.detail.requestConfig && evt.detail.requestConfig.path;
 				if (!url) return;

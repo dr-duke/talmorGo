@@ -34,7 +34,7 @@ templ FilesTab(files []*model.File) {
 }
 
 templ FilesList(files []*model.File) {
-	<div id="files-inner" hx-get="/files/list" hx-trigger="every 10s" hx-swap="outerHTML">
+	<div id="files-inner" hx-get="files/list" hx-trigger="every 10s" hx-swap="outerHTML">
 		if len(files) == 0 {
 			<p class="empty">Файлов нет</p>
 		} else {
@@ -55,7 +55,7 @@ templ FilesList(files []*model.File) {
 								<!-- Просмотр в попапе -->
 								<button
 									class="ghost"
-									data-src={ fmt.Sprintf("/files/%s/stream", f.ID) }
+									data-src={ fmt.Sprintf("files/%s/stream", f.ID) }
 									data-title={ f.Name }
 									onclick="openPlayer(this.dataset.src, this.dataset.title)"
 									title="Смотреть в окне"
@@ -63,14 +63,14 @@ templ FilesList(files []*model.File) {
 								<!-- Открыть в новой вкладке -->
 								<a
 									class="btn ghost"
-									href={ templ.SafeURL(fmt.Sprintf("/files/%s/stream", f.ID)) }
+									href={ templ.SafeURL(fmt.Sprintf("files/%s/stream", f.ID)) }
 									target="_blank"
 									title="Открыть в вкладке"
 								>⧉</a>
 								<!-- Скачать -->
 								<a
 									class="btn ghost"
-									href={ templ.SafeURL(fmt.Sprintf("/files/%s/stream?download=true", f.ID)) }
+									href={ templ.SafeURL(fmt.Sprintf("files/%s/stream?download=true", f.ID)) }
 									title="Скачать"
 								>⬇</a>
 								<!-- Presigned ссылка -->
@@ -91,7 +91,7 @@ templ FilesList(files []*model.File) {
 								<!-- Удалить -->
 								<button
 									class="danger"
-									hx-delete={ fmt.Sprintf("/files/%s", f.ID) }
+									hx-delete={ fmt.Sprintf("files/%s", f.ID) }
 									hx-target="#files-inner"
 									hx-swap="outerHTML"
 									hx-confirm={ fmt.Sprintf("Удалить %s?", f.Name) }

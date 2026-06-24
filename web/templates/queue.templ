@@ -10,7 +10,7 @@ templ QueueTab(jobs []*model.Job) {
 	<!-- add-form -->
 	<form
 		class="add-form"
-		hx-post="/queue"
+		hx-post="queue"
 		hx-target="#queue-inner"
 		hx-swap="outerHTML"
 	>
@@ -52,7 +52,7 @@ templ QueueTab(jobs []*model.Job) {
 }
 
 templ QueueList(jobs []*model.Job) {
-	<div id="queue-inner" hx-get="/queue/list" hx-trigger="every 4s" hx-swap="outerHTML">
+	<div id="queue-inner" hx-get="queue/list" hx-trigger="every 4s" hx-swap="outerHTML">
 		if len(jobs) == 0 {
 			<p class="empty">Очередь пуста</p>
 		} else {
@@ -75,7 +75,7 @@ templ QueueList(jobs []*model.Job) {
 								if j.Status == model.JobPending {
 									<button
 										class="danger"
-										hx-delete={ fmt.Sprintf("/queue/%s", j.ID) }
+										hx-delete={ fmt.Sprintf("queue/%s", j.ID) }
 										hx-target="#queue-inner"
 										hx-swap="outerHTML"
 										hx-confirm="Удалить задачу?"
@@ -92,7 +92,7 @@ templ QueueList(jobs []*model.Job) {
 									<span title={ j.Error } style="color:#f77;cursor:help" title="Ошибка">⚠</span>
 									<button
 										class="secondary"
-										hx-post={ fmt.Sprintf("/jobs/%s/retry", j.ID) }
+										hx-post={ fmt.Sprintf("jobs/%s/retry", j.ID) }
 										hx-target="#queue-inner"
 										hx-swap="outerHTML"
 										hx-confirm="Добавить обратно в очередь?"
