@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -12,17 +13,28 @@ import (
 	"github.com/dr-duke/talmorGo/internal/repo"
 )
 
-// Notification описывает уведомление, отправляемое пользователю Telegram.
-// Поля DownloadURL/ViewURL/Token заполняются при успешном скачивании.
-// JobID + IsFailure заполняются при ошибке (для кнопки "Повторить").
+// NotifKind определяет тип уведомления.
+type NotifKind uint8
+
+const (
+	NotifJobStarted  NotifKind = iota // задание взято в работу → редактируем сообщение очереди
+	NotifFileDone                     // файл скачан → новое сообщение-карточка
+	NotifJobDone                      // все файлы готово → удаляем сообщение очереди
+	NotifJobFailed                    // задание окончательно упало → редактируем сообщение
+	NotifJobRetrying                  // запланирован повтор → редактируем сообщение
+)
+
+// Notification — единый тип для всех уведомлений воркера.
 type Notification struct {
-	ChatID      int64
-	Text        string
-	DownloadURL string // URL кнопки "Скачать" (?download=true)
-	ViewURL     string // URL кнопки "Смотреть" (opens in Telegram browser)
-	Token       string // presigned token, для кнопки "🔗 Ссылка" (callback)
-	JobID       string // ID задания, для кнопки "↩ Повторить" (callback)
-	IsFailure   bool   // показывать кнопку Повторить вместо кнопок плеера
+	Kind      NotifKind
+	ChatID    int64
+	MessageID int64  // ID сообщения очереди в Telegram (для редактирования/удаления)
+	JobID     string // для кнопки Stop/Retry
+	JobURL    string // краткий URL для отображения в сообщении очереди
+	FileName  string // NotifFileDone: имя файла
+	Token     string // NotifFileDone: presigned-токен
+	ErrText   string // NotifJobFailed: текст ошибки
+	RetryAt   string // NotifJobRetrying: «через Xm»
 }
 
 // Notifier отправляет уведомления пользователю (реализует Telegram-бот).
@@ -50,13 +62,8 @@ func NewPool(cfg *config.Config, jobRepo repo.JobRepo, fileRepo repo.FileRepo, t
 	}
 }
 
-// SetNotifier позволяет установить нотификатор после создания пула
-// (для разрыва циклической зависимости бот ↔ пул).
-func (p *Pool) SetNotifier(n Notifier) {
-	p.notifier = n
-}
+func (p *Pool) SetNotifier(n Notifier) { p.notifier = n }
 
-// Enqueue сигнализирует воркерам о новой задаче в очереди.
 func (p *Pool) Enqueue() {
 	select {
 	case p.notify <- struct{}{}:
@@ -64,20 +71,16 @@ func (p *Pool) Enqueue() {
 	}
 }
 
-// Start запускает N воркеров и блокируется до отмены ctx.
 func (p *Pool) Start(ctx context.Context) {
 	if err := p.jobRepo.ResetStale(ctx); err != nil {
 		slog.Error("worker: reset stale jobs", "err", err)
 	}
-
 	for i := range p.cfg.WorkerCount {
 		go p.runWorker(ctx, i)
 	}
-
 	for range p.cfg.WorkerCount {
 		p.Enqueue()
 	}
-
 	<-ctx.Done()
 }
 
@@ -91,7 +94,6 @@ func (p *Pool) runWorker(ctx context.Context, id int) {
 		case <-p.notify:
 		case <-time.After(10 * time.Second):
 		}
-
 		for {
 			job, err := p.jobRepo.ClaimNext(ctx)
 			if err != nil {
@@ -106,8 +108,22 @@ func (p *Pool) runWorker(ctx context.Context, id int) {
 	}
 }
 
+func (p *Pool) tgJob(job *model.Job) bool {
+	return job.Source == "telegram" && job.ChatID != 0 && p.notifier != nil
+}
+
 func (p *Pool) process(ctx context.Context, job *model.Job) {
 	slog.Info("worker: processing job", "id", job.ID, "url", job.URL, "attempt", job.RetryCount+1)
+
+	if p.tgJob(job) {
+		p.notifier.Notify(ctx, Notification{
+			Kind:      NotifJobStarted,
+			ChatID:    job.ChatID,
+			MessageID: job.TgMessageID,
+			JobID:     job.ID,
+			JobURL:    job.URL,
+		})
+	}
 
 	opts := downloader.Options{
 		Binary:       p.cfg.YtDlpBinary,
@@ -156,6 +172,19 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		if firstFile == nil {
 			firstFile = f
 		}
+
+		// Отправляем карточку файла в Telegram сразу после сохранения.
+		if p.tgJob(job) && p.tokenRepo != nil {
+			if tok, err := p.tokenRepo.Upsert(ctx, f.ID); err == nil {
+				p.notifier.Notify(ctx, Notification{
+					Kind:     NotifFileDone,
+					ChatID:   job.ChatID,
+					JobID:    job.ID,
+					FileName: f.Name,
+					Token:    tok.Token,
+				})
+			}
+		}
 	}
 
 	if lastErr != nil && firstFile == nil {
@@ -172,25 +201,17 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		slog.Error("worker: update job done", "err", err)
 	}
 
-	if job.Source == "telegram" && job.ChatID != 0 && p.notifier != nil && firstFile != nil {
-		n := Notification{
-			ChatID: job.ChatID,
-			Text:   "✅ Скачано: " + job.Title,
-		}
-		if p.cfg.BaseURL != "" && p.tokenRepo != nil {
-			if tok, err := p.tokenRepo.Upsert(ctx, firstFile.ID); err == nil {
-				n.DownloadURL = p.cfg.BaseURL + "/f/" + tok.Token + "?download=true"
-				n.ViewURL = p.cfg.BaseURL + "/f/" + tok.Token
-				n.Token = tok.Token
-			}
-		}
-		p.notifier.Notify(ctx, n)
+	// Удаляем сообщение очереди — карточки файлов уже отправлены.
+	if p.tgJob(job) {
+		p.notifier.Notify(ctx, Notification{
+			Kind:      NotifJobDone,
+			ChatID:    job.ChatID,
+			MessageID: job.TgMessageID,
+		})
 	}
 	slog.Info("worker: job done", "id", job.ID, "title", job.Title)
 }
 
-// handleFailure обрабатывает ошибку скачивания: планирует повтор с backoff или
-// помечает задание как failed при истечении максимального окна.
 func (p *Pool) handleFailure(ctx context.Context, job *model.Job, lastErr error) {
 	maxDuration := time.Duration(p.cfg.RetryMaxDuration) * time.Second
 	base := time.Duration(p.cfg.RetryBackoffBase) * time.Second
@@ -204,7 +225,6 @@ func (p *Pool) handleFailure(ctx context.Context, job *model.Job, lastErr error)
 	retryCount := job.RetryCount + 1
 	shift := min(retryCount-1, 15)
 	backoff := base * time.Duration(1<<uint(shift))
-
 	maxWindow := firstFailed.Add(maxDuration)
 
 	if now.Add(backoff).After(maxWindow) {
@@ -217,12 +237,14 @@ func (p *Pool) handleFailure(ctx context.Context, job *model.Job, lastErr error)
 			slog.Error("worker: update job failed", "err", err)
 		}
 		slog.Warn("worker: job failed permanently", "id", job.ID, "attempts", retryCount)
-		if job.Source == "telegram" && job.ChatID != 0 && p.notifier != nil {
+		if p.tgJob(job) {
 			p.notifier.Notify(ctx, Notification{
+				Kind:      NotifJobFailed,
 				ChatID:    job.ChatID,
-				Text:      "❌ Не удалось скачать:\n" + job.DisplayName() + "\n\n" + lastErr.Error(),
+				MessageID: job.TgMessageID,
 				JobID:     job.ID,
-				IsFailure: true,
+				JobURL:    job.URL,
+				ErrText:   lastErr.Error(),
 			})
 		}
 		return
@@ -238,4 +260,25 @@ func (p *Pool) handleFailure(ctx context.Context, job *model.Job, lastErr error)
 		slog.Error("worker: update job retrying", "err", err)
 	}
 	slog.Info("worker: retry scheduled", "id", job.ID, "attempt", retryCount, "next_retry", nextRetry.Format(time.RFC3339))
+	if p.tgJob(job) {
+		retryIn := formatDuration(time.Until(nextRetry))
+		p.notifier.Notify(ctx, Notification{
+			Kind:      NotifJobRetrying,
+			ChatID:    job.ChatID,
+			MessageID: job.TgMessageID,
+			JobID:     job.ID,
+			JobURL:    job.URL,
+			RetryAt:   retryIn,
+		})
+	}
+}
+
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return "скоро"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("через %dm", int(d.Minutes()))
+	}
+	return fmt.Sprintf("через %dh", int(d.Hours()))
 }

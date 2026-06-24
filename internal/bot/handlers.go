@@ -128,17 +128,29 @@ func (b *Bot) handleURL(ctx context.Context, msg *tgbotapi.Message) {
 			slog.Error("bot: create job", "err", err)
 			continue
 		}
+
+		// Отправляем сообщение очереди и сохраняем его ID для последующего редактирования.
+		stopKb := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🛑 Отменить", "stop:"+job.ID),
+			),
+		)
+		msgID := b.sendMarkup(msg.Chat.ID,
+			"⏳ <b>В очереди</b>\n"+escapeHTML(shortenMsg(part)),
+			&stopKb,
+		)
+		if msgID != 0 {
+			b.jobs.SetTgMessageID(ctx, job.ID, msgID) //nolint:errcheck
+		}
+
 		b.pool.Enqueue()
 		added++
 	}
 
-	switch {
-	case added > 0 && invalid == 0:
-		b.send(msg.Chat.ID, fmt.Sprintf("✅ Добавлено в очередь: %d", added))
-	case added > 0:
-		b.send(msg.Chat.ID, fmt.Sprintf("✅ Добавлено: %d, пропущено (не URL): %d", added, invalid))
-	default:
+	if added == 0 {
 		b.send(msg.Chat.ID, "❌ Не найдено корректных ссылок")
+	} else if invalid > 0 {
+		b.send(msg.Chat.ID, fmt.Sprintf("⚠️ Пропущено (не URL): %d", invalid))
 	}
 }
 
@@ -171,20 +183,39 @@ func (b *Bot) handleCallback(ctx context.Context, cq *tgbotapi.CallbackQuery) {
 		b.send(chatID, "🔗 "+b.cfg.BaseURL+"/f/"+token)
 		b.answerCallback(cq.ID, "Ссылка отправлена")
 
+	case strings.HasPrefix(data, "stop:"):
+		// Отмена задания (работает только для pending).
+		jobID := strings.TrimPrefix(data, "stop:")
+		if err := b.jobs.Delete(ctx, jobID); err != nil {
+			b.answerCallback(cq.ID, "⚠️ Нельзя отменить — задание уже выполняется")
+			return
+		}
+		b.answerCallback(cq.ID, "🛑 Задача отменена")
+		b.deleteMsg(chatID, cq.Message.MessageID)
+
 	case strings.HasPrefix(data, "retry:"):
-		// Сбрасываем failed-задачу в pending.
+		// Сбрасываем failed-задачу в pending, редактируем сообщение в «очередь».
 		jobID := strings.TrimPrefix(data, "retry:")
+		job, err := b.jobs.GetByID(ctx, jobID)
+		if err != nil {
+			b.answerCallback(cq.ID, "Ошибка: задание не найдено")
+			return
+		}
 		if err := b.jobs.ResetFailed(ctx, jobID); err != nil {
 			b.answerCallback(cq.ID, "Ошибка: "+err.Error())
 			return
 		}
 		b.pool.Enqueue()
-		b.answerCallback(cq.ID, "Добавлено в очередь")
-		// Редактируем сообщение, чтобы убрать кнопку "Повторить".
-		edit := tgbotapi.NewEditMessageText(chatID, cq.Message.MessageID,
-			cq.Message.Text+"\n\n⏳ Повторная попытка добавлена в очередь")
-		edit.ParseMode = tgbotapi.ModeHTML
-		b.api.Send(edit) //nolint:errcheck
+		b.answerCallback(cq.ID, "⏳ Добавлено в очередь")
+		stopKb := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🛑 Отменить", "stop:"+jobID),
+			),
+		)
+		b.editMsg(chatID, cq.Message.MessageID,
+			"⏳ <b>В очереди</b> (повтор)\n"+escapeHTML(shortenMsg(job.URL)),
+			stopKb,
+		)
 
 	default:
 		b.answerCallback(cq.ID, "")
@@ -260,10 +291,19 @@ func (b *Bot) sendMediaList(ctx context.Context, chatID int64, header string, it
 			continue
 		}
 		label := fmt.Sprintf("%d. %s", i+1, truncate(item.DisplayTitle(), 18))
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("▶️ "+label, "view:"+tok.Token),
-			tgbotapi.NewInlineKeyboardButtonData("📥", "dl:"+tok.Token),
-		))
+		if b.isPublic() {
+			viewURL := b.cfg.BaseURL + "/f/" + tok.Token
+			dlURL := b.cfg.BaseURL + "/f/" + tok.Token + "?download=true"
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonURL("▶️ "+label, viewURL),
+				tgbotapi.NewInlineKeyboardButtonURL("📥", dlURL),
+			))
+		} else {
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("▶️ "+label, "view:"+tok.Token),
+				tgbotapi.NewInlineKeyboardButtonData("📥", "dl:"+tok.Token),
+			))
+		}
 	}
 
 	msg := tgbotapi.NewMessage(chatID, sb.String())

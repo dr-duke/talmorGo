@@ -27,6 +27,8 @@ type JobRepo interface {
 	ResetStale(ctx context.Context) error
 	// Redownload сбрасывает задание в pending и очищает привязку к файлу.
 	Redownload(ctx context.Context, id string) error
+	// SetTgMessageID сохраняет ID Telegram-сообщения очереди для редактирования/удаления.
+	SetTgMessageID(ctx context.Context, jobID string, msgID int64) error
 }
 
 type FileRepo interface {

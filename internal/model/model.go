@@ -29,6 +29,7 @@ type Job struct {
 	RetryCount    int
 	NextRetryAt   *time.Time
 	FirstFailedAt *time.Time
+	TgMessageID   int64
 }
 
 func (j *Job) DisplayName() string {

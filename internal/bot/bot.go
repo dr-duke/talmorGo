@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/dr-duke/talmorGo/internal/config"
@@ -57,7 +59,6 @@ func New(cfg *config.Config, jobs repo.JobRepo, files repo.FileRepo, tokens repo
 	return b, nil
 }
 
-// setCommands регистрирует команды в меню Telegram-бота.
 func (b *Bot) setCommands() {
 	cmds := tgbotapi.NewSetMyCommands(
 		tgbotapi.BotCommand{Command: "start", Description: "Начало работы"},
@@ -72,39 +73,132 @@ func (b *Bot) setCommands() {
 	}
 }
 
-// Notify реализует worker.Notifier — отправляет сообщение с inline-кнопками.
-// Используем только callback-кнопки: Telegram отклоняет URL-кнопки с localhost
-// и LAN-адресами, а бот строит URL самостоятельно из cfg.BaseURL + token.
+// Notify реализует worker.Notifier.
 func (b *Bot) Notify(ctx context.Context, n worker.Notification) {
-	msg := tgbotapi.NewMessage(n.ChatID, n.Text)
+	switch n.Kind {
+
+	case worker.NotifJobStarted:
+		// Редактируем сообщение очереди → «скачивается».
+		if n.MessageID == 0 {
+			return
+		}
+		b.editMsg(n.ChatID, int(n.MessageID),
+			"⬇️ <b>Скачивается…</b>\n"+escapeHTML(shortenMsg(n.JobURL)),
+			tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("🛑 Отменить", "stop:"+n.JobID),
+				),
+			),
+		)
+
+	case worker.NotifFileDone:
+		// Новое сообщение-карточка на каждый файл.
+		b.sendFileCard(n.ChatID, n.FileName, n.Token)
+
+	case worker.NotifJobDone:
+		// Удаляем сообщение очереди — карточки уже появились выше.
+		if n.MessageID != 0 {
+			b.deleteMsg(n.ChatID, int(n.MessageID))
+		}
+
+	case worker.NotifJobFailed:
+		// Редактируем сообщение очереди → «ошибка».
+		if n.MessageID == 0 {
+			return
+		}
+		errShort := n.ErrText
+		if len([]rune(errShort)) > 200 {
+			errShort = string([]rune(errShort)[:197]) + "…"
+		}
+		b.editMsg(n.ChatID, int(n.MessageID),
+			"❌ <b>Ошибка скачивания</b>\n"+escapeHTML(shortenMsg(n.JobURL))+"\n\n<code>"+escapeHTML(errShort)+"</code>",
+			tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("↩ Повторить", "retry:"+n.JobID),
+				),
+			),
+		)
+
+	case worker.NotifJobRetrying:
+		// Редактируем сообщение очереди → «повтор через…».
+		if n.MessageID == 0 {
+			return
+		}
+		b.editMsg(n.ChatID, int(n.MessageID),
+			"🔄 <b>Повтор "+n.RetryAt+"</b>\n"+escapeHTML(shortenMsg(n.JobURL)),
+			tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("🛑 Отменить", "stop:"+n.JobID),
+				),
+			),
+		)
+	}
+}
+
+// sendFileCard отправляет карточку скачанного файла.
+// При публичном BASE_URL — URL-кнопки (прямое открытие/скачивание).
+// При localhost/private — callback-кнопки (бот присылает ссылку текстом).
+func (b *Bot) sendFileCard(chatID int64, name, token string) {
+	text := "✅ <b>" + escapeHTML(name) + "</b>"
+	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = tgbotapi.ModeHTML
 	msg.DisableWebPagePreview = true
 
-	var rows [][]tgbotapi.InlineKeyboardButton
-	if !n.IsFailure && n.Token != "" {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("▶️ Смотреть", "view:"+n.Token),
-			tgbotapi.NewInlineKeyboardButtonData("📥 Скачать", "dl:"+n.Token),
-		))
+	if b.isPublic() {
+		viewURL := b.cfg.BaseURL + "/f/" + token
+		dlURL := b.cfg.BaseURL + "/f/" + token + "?download=true"
+		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonURL("▶️ Смотреть", viewURL),
+				tgbotapi.NewInlineKeyboardButtonURL("📥 Скачать", dlURL),
+			),
+		)
+	} else {
+		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("▶️ Смотреть", "view:"+token),
+				tgbotapi.NewInlineKeyboardButtonData("📥 Скачать", "dl:"+token),
+			),
+		)
 	}
-	if n.IsFailure && n.JobID != "" {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("↩ Повторить", "retry:"+n.JobID),
-		))
-	}
-	if len(rows) > 0 {
-		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	}
-
 	if _, err := b.api.Send(msg); err != nil {
-		slog.Error("bot: notify", "chat_id", n.ChatID, "err", err)
+		slog.Error("bot: send file card", "err", err)
 	}
+}
+
+// isPublic возвращает true если BASE_URL указывает на публичный домен
+// (не localhost и не RFC-1918 private range).
+func (b *Bot) isPublic() bool {
+	if b.cfg.BaseURL == "" {
+		return false
+	}
+	parsed, err := url.Parse(b.cfg.BaseURL)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return false
+	}
+	if strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") {
+		return false
+	}
+	// 172.16.0.0/12 → 172.16.x.x – 172.31.x.x
+	if strings.HasPrefix(host, "172.") {
+		parts := strings.SplitN(host, ".", 3)
+		if len(parts) >= 2 {
+			if n, err := strconv.Atoi(parts[1]); err == nil && n >= 16 && n <= 31 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Start запускает long polling и блокируется до отмены ctx.
 func (b *Bot) Start(ctx context.Context) {
 	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 20 // короче NAT-таймаута типичных сред (OrbStack, Docker NAT ~25s)
+	u.Timeout = 20
 
 	updates := b.api.GetUpdatesChan(u)
 	slog.Info("bot: started polling")
@@ -128,12 +222,41 @@ func (b *Bot) Start(ctx context.Context) {
 	}
 }
 
+// ── низкоуровневые методы ──────────────────────────────────────────────────
+
+// send отправляет текстовое сообщение, возвращает message_id (0 при ошибке).
 func (b *Bot) send(chatID int64, text string) {
+	b.sendMarkup(chatID, text, nil)
+}
+
+func (b *Bot) sendMarkup(chatID int64, text string, markup *tgbotapi.InlineKeyboardMarkup) int64 {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = tgbotapi.ModeHTML
 	msg.DisableWebPagePreview = true
-	if _, err := b.api.Send(msg); err != nil {
+	if markup != nil {
+		msg.ReplyMarkup = *markup
+	}
+	sent, err := b.api.Send(msg)
+	if err != nil {
 		slog.Error("bot: send", "err", err)
+		return 0
+	}
+	return int64(sent.MessageID)
+}
+
+func (b *Bot) editMsg(chatID int64, msgID int, text string, keyboard tgbotapi.InlineKeyboardMarkup) {
+	edit := tgbotapi.NewEditMessageText(chatID, msgID, text)
+	edit.ParseMode = tgbotapi.ModeHTML
+	edit.ReplyMarkup = &keyboard
+	if _, err := b.api.Send(edit); err != nil {
+		slog.Debug("bot: edit message", "err", err)
+	}
+}
+
+func (b *Bot) deleteMsg(chatID int64, msgID int) {
+	del := tgbotapi.NewDeleteMessage(chatID, msgID)
+	if _, err := b.api.Request(del); err != nil {
+		slog.Debug("bot: delete message", "err", err)
 	}
 }
 
@@ -142,4 +265,12 @@ func (b *Bot) answerCallback(queryID, text string) {
 	if _, err := b.api.Request(cb); err != nil {
 		slog.Error("bot: answer callback", "err", err)
 	}
+}
+
+func shortenMsg(s string) string {
+	r := []rune(s)
+	if len(r) > 60 {
+		return string(r[:57]) + "…"
+	}
+	return s
 }

@@ -1,0 +1,1 @@
+ALTER TABLE jobs ADD COLUMN tg_message_id INTEGER DEFAULT 0;

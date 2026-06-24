@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const jobSelect = `SELECT id, url, status, title, COALESCE(file_id,''), error, source, chat_id, created_at, updated_at, retry_count, next_retry_at, first_failed_at FROM jobs`
+const jobSelect = `SELECT id, url, status, title, COALESCE(file_id,''), error, source, chat_id, created_at, updated_at, retry_count, next_retry_at, first_failed_at, COALESCE(tg_message_id,0) FROM jobs`
 
 type sqliteJobRepo struct {
 	db *sql.DB
@@ -236,7 +236,7 @@ func (r *sqliteJobRepo) ClaimNext(ctx context.Context) (*model.Job, error) {
 		        OR (status='retrying' AND next_retry_at <= ?)
 		     ORDER BY created_at ASC LIMIT 1
 		 )
-		 RETURNING id, url, status, title, COALESCE(file_id,''), error, source, chat_id, created_at, updated_at, retry_count, next_retry_at, first_failed_at`,
+		 RETURNING id, url, status, title, COALESCE(file_id,''), error, source, chat_id, created_at, updated_at, retry_count, next_retry_at, first_failed_at, COALESCE(tg_message_id,0)`,
 		now, now,
 	)
 	j, err := scanJob(row)
@@ -322,7 +322,7 @@ func scanJob(s scanner) (*model.Job, error) {
 	err := s.Scan(
 		&j.ID, &j.URL, &j.Status, &j.Title, &j.FileID, &j.Error,
 		&j.Source, &j.ChatID, &createdAt, &updatedAt,
-		&j.RetryCount, &nextRetryAt, &firstFailedAt,
+		&j.RetryCount, &nextRetryAt, &firstFailedAt, &j.TgMessageID,
 	)
 	if err != nil {
 		return nil, err
@@ -338,6 +338,11 @@ func scanJob(s scanner) (*model.Job, error) {
 		j.FirstFailedAt = &t
 	}
 	return &j, nil
+}
+
+func (r *sqliteJobRepo) SetTgMessageID(ctx context.Context, jobID string, msgID int64) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE jobs SET tg_message_id=? WHERE id=?`, msgID, jobID)
+	return err
 }
 
 func nullStr(s string) any {
