@@ -140,6 +140,12 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 	fileCount := 0
 
 	for event := range downloader.Run(ctx, job.URL, opts) {
+		if event.Log != "" {
+			if err := p.jobRepo.SaveLog(ctx, job.ID, event.Log); err != nil {
+				slog.Warn("worker: save log", "job", job.ID, "err", err)
+			}
+			continue
+		}
 		if event.Err != nil {
 			lastErr = event.Err
 			slog.Error("worker: download event error", "job", job.ID, "err", event.Err)

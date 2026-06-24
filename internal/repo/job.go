@@ -345,6 +345,20 @@ func (r *sqliteJobRepo) SetTgMessageID(ctx context.Context, jobID string, msgID 
 	return err
 }
 
+func (r *sqliteJobRepo) SaveLog(ctx context.Context, jobID, log string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE jobs SET last_log=? WHERE id=?`, log, jobID)
+	return err
+}
+
+func (r *sqliteJobRepo) GetLog(ctx context.Context, jobID string) (string, error) {
+	var v sql.NullString
+	err := r.db.QueryRowContext(ctx, `SELECT last_log FROM jobs WHERE id=?`, jobID).Scan(&v)
+	if err != nil {
+		return "", err
+	}
+	return v.String, nil
+}
+
 func nullStr(s string) any {
 	if s == "" {
 		return nil

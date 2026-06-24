@@ -175,6 +175,18 @@ func (h *MediaHandler) RemoveTag(w http.ResponseWriter, r *http.Request) {
 	h.List(w, r)
 }
 
+// Log возвращает plain-text лог последней попытки скачивания.
+func (h *MediaHandler) Log(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+	log, err := h.Jobs.GetLog(r.Context(), jobID)
+	if err != nil || log == "" {
+		http.Error(w, "log not available", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write([]byte(log)) //nolint:errcheck
+}
+
 // ListDeleted возвращает JSON-список soft-удалённых файлов.
 func (h *MediaHandler) ListDeleted(w http.ResponseWriter, r *http.Request) {
 	files, err := h.Files.ListDeleted(r.Context())

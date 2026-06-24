@@ -29,6 +29,10 @@ type JobRepo interface {
 	Redownload(ctx context.Context, id string) error
 	// SetTgMessageID сохраняет ID Telegram-сообщения очереди для редактирования/удаления.
 	SetTgMessageID(ctx context.Context, jobID string, msgID int64) error
+	// SaveLog сохраняет вывод stderr последней попытки скачивания.
+	SaveLog(ctx context.Context, jobID, log string) error
+	// GetLog возвращает сохранённый лог; пустая строка — лог отсутствует.
+	GetLog(ctx context.Context, jobID string) (string, error)
 }
 
 type FileRepo interface {

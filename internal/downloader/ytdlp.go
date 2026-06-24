@@ -19,6 +19,8 @@ type Event struct {
 	// Path — полный путь к файлу.
 	Path string
 	Err  error
+	// Log — полный вывод stderr (только в финальном событии после завершения процесса).
+	Log string
 }
 
 type Options struct {
@@ -70,10 +72,12 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 
 		filePattern := buildFilePattern(opts.OutputDir)
 
+		const maxLogLines = 2000
+
 		var (
 			mu        sync.Mutex
 			fileCount int
-			errLines  []string
+			logLines  []string // полный stderr для хранения в БД
 			wg        sync.WaitGroup
 		)
 
@@ -97,7 +101,7 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 			}
 		}()
 
-		// stderr: логируем, сохраняем последние строки для диагностики.
+		// stderr: логируем в slog и накапливаем для хранения в БД.
 		go func() {
 			defer wg.Done()
 			s := bufio.NewScanner(stderr)
@@ -105,9 +109,8 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 				text := s.Text()
 				slog.Info("yt-dlp stderr", "line", text)
 				mu.Lock()
-				errLines = append(errLines, text)
-				if len(errLines) > 10 {
-					errLines = errLines[len(errLines)-10:]
+				if len(logLines) < maxLogLines {
+					logLines = append(logLines, text)
 				}
 				mu.Unlock()
 			}
@@ -118,8 +121,14 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 
 		mu.Lock()
 		count := fileCount
-		errMsg := lastErrorLine(errLines)
+		fullLog := strings.Join(logLines, "\n")
+		errMsg := lastErrorLine(logLines)
 		mu.Unlock()
+
+		// Отправляем накопленный лог для сохранения в БД.
+		if fullLog != "" {
+			ch <- Event{Log: fullLog}
+		}
 
 		// Сигнализируем ошибку только если не скачали ни одного файла.
 		// При частичном успехе (--no-abort-on-error) файлы уже отправлены выше.

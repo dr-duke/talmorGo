@@ -64,6 +64,7 @@ func New(
 	mux.HandleFunc("POST /jobs/{id}/redownload", mh.Redownload)
 	mux.HandleFunc("POST /jobs/{id}/tags", mh.AddTag)
 	mux.HandleFunc("DELETE /jobs/{id}/tags/{tag}", mh.RemoveTag)
+	mux.HandleFunc("GET /jobs/{id}/log", mh.Log)
 
 	// Очередь — добавление и управление.
 	mux.HandleFunc("POST /queue", qh.Add)

@@ -154,6 +154,15 @@ templ mediaRow(item *model.MediaItem) {
 				onclick="copyOriginalURL(this.dataset.url)"
 				title="Скопировать исходную ссылку"
 			><span class="m3-icon">content_copy</span></button>
+			if item.Job.Status != model.JobPending {
+				<button
+					class="m3-icon-btn"
+					data-job-id={ item.Job.ID }
+					data-title={ item.DisplayTitle() }
+					onclick="event.stopPropagation();openLog(this.dataset.jobId, this.dataset.title)"
+					title="Лог скачивания"
+				><span class="m3-icon">terminal</span></button>
+			}
 			if item.File != nil && item.File.IsAvailable() {
 				<button
 					class="m3-icon-btn"

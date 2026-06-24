@@ -277,6 +277,35 @@ templ Layout(title string, basePath string) {
 				}
 				.player-close:hover { background: rgba(255,255,255,.1); }
 
+				/* ── Log dialog ── */
+				dialog#log-dialog {
+					background: var(--m3-surface); border: 1px solid var(--m3-outline-var);
+					border-radius: 16px; padding: 0;
+					width: min(96vw, 860px); max-height: 86vh;
+					overflow: hidden; margin: auto;
+					box-shadow: 0 8px 48px rgba(0,0,0,.6);
+					display: flex; flex-direction: column;
+				}
+				dialog#log-dialog::backdrop { background: var(--m3-scrim); }
+				.log-header {
+					display: flex; justify-content: space-between; align-items: center;
+					padding: .75rem 1rem; border-bottom: 1px solid var(--m3-outline-var);
+					flex-shrink: 0;
+				}
+				.log-title {
+					font-size: .9rem; font-weight: 500; color: var(--m3-on-surface);
+					overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+					flex: 1; margin-right: .5rem;
+				}
+				#log-content {
+					flex: 1; overflow: auto;
+					margin: 0; padding: .875rem 1rem;
+					font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+					font-size: .78rem; line-height: 1.55;
+					color: #c8d0e0; white-space: pre-wrap; word-break: break-all;
+					background: #0a0a0d;
+				}
+
 				/* ── Mobile ── */
 				@media (max-width: 600px) {
 					header { padding: .75rem; }
@@ -314,6 +343,17 @@ templ Layout(title string, basePath string) {
 				<video id="plyr-video" playsinline></video>
 			</dialog>
 
+			<!-- Log popup -->
+			<dialog id="log-dialog">
+				<div class="log-header">
+					<span class="log-title" id="log-dialog-title">Лог скачивания</span>
+					<button class="player-close" onclick="closeLog()">
+						<span class="m3-icon">close</span>
+					</button>
+				</div>
+				<pre id="log-content"></pre>
+			</dialog>
+
 			<script>
 				// ── Plyr ──
 				var plyrInstance;
@@ -335,6 +375,24 @@ templ Layout(title string, basePath string) {
 				}
 				document.getElementById('player-dialog').addEventListener('click', function(e) {
 					if (e.target === this) closePlayer();
+				});
+
+				// ── Log dialog ──
+				function openLog(jobID, title) {
+					document.getElementById('log-dialog-title').textContent = (title || 'Лог скачивания') + ' — лог';
+					var pre = document.getElementById('log-content');
+					pre.textContent = 'Загрузка…';
+					document.getElementById('log-dialog').showModal();
+					fetch('jobs/' + jobID + '/log')
+						.then(function(r) { return r.ok ? r.text() : Promise.reject('Лог недоступен'); })
+						.then(function(t) { pre.textContent = t || '(пусто)'; })
+						.catch(function(e) { pre.textContent = String(e); });
+				}
+				function closeLog() {
+					document.getElementById('log-dialog').close();
+				}
+				document.getElementById('log-dialog').addEventListener('click', function(e) {
+					if (e.target === this) closeLog();
 				});
 
 				// ── File ops ──
