@@ -48,6 +48,15 @@ type Config struct {
 	YtDlpMaxFilesPerRequest int `long:"ytdlp-max-files" env:"YT_DLP_MAX_FILES_PER_REQUEST" default:"100"`
 }
 
+// LinkBase возвращает корень для построения публичных ссылок: BASE_URL + BASE_PATH.
+// Пример: BASE_URL=https://media.example.com, BASE_PATH=/talmor → https://media.example.com/talmor
+// BASE_URL уже не должен содержать путь — он хранится в BASE_PATH.
+func (c *Config) LinkBase() string {
+	base := strings.TrimRight(c.BaseURL, "/")
+	prefix := strings.TrimRight(c.BasePath, "/")
+	return base + prefix
+}
+
 // ExtraArgsList возвращает YT_DLP_EXTRA_ARGS как слайс строк.
 func (c *Config) ExtraArgsList() []string {
 	s := strings.TrimSpace(c.YtDlpExtraArgs)

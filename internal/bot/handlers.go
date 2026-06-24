@@ -166,21 +166,18 @@ func (b *Bot) handleCallback(ctx context.Context, cq *tgbotapi.CallbackQuery) {
 
 	switch {
 	case strings.HasPrefix(data, "view:"):
-		// Смотреть — ссылка на потоковый просмотр.
 		token := strings.TrimPrefix(data, "view:")
-		b.send(chatID, "▶️ "+b.cfg.BaseURL+"/f/"+token)
+		b.send(chatID, "▶️ "+b.cfg.LinkBase()+"/f/"+token)
 		b.answerCallback(cq.ID, "Ссылка для просмотра отправлена")
 
 	case strings.HasPrefix(data, "dl:"):
-		// Скачать — ссылка со скачиванием файла.
 		token := strings.TrimPrefix(data, "dl:")
-		b.send(chatID, "📥 "+b.cfg.BaseURL+"/f/"+token+"?download=true")
+		b.send(chatID, "📥 "+b.cfg.LinkBase()+"/f/"+token+"?download=true")
 		b.answerCallback(cq.ID, "Ссылка для скачивания отправлена")
 
 	case strings.HasPrefix(data, "link:"):
-		// Постоянная ссылка (устаревший вариант, сохранён для обратной совместимости).
 		token := strings.TrimPrefix(data, "link:")
-		b.send(chatID, "🔗 "+b.cfg.BaseURL+"/f/"+token)
+		b.send(chatID, "🔗 "+b.cfg.LinkBase()+"/f/"+token)
 		b.answerCallback(cq.ID, "Ссылка отправлена")
 
 	case strings.HasPrefix(data, "stop:"):
@@ -292,8 +289,8 @@ func (b *Bot) sendMediaList(ctx context.Context, chatID int64, header string, it
 		}
 		label := fmt.Sprintf("%d. %s", i+1, truncate(item.DisplayTitle(), 18))
 		if b.isPublic() {
-			viewURL := b.cfg.BaseURL + "/f/" + tok.Token
-			dlURL := b.cfg.BaseURL + "/f/" + tok.Token + "?download=true"
+			viewURL := b.cfg.LinkBase() + "/f/" + tok.Token
+			dlURL := b.cfg.LinkBase() + "/f/" + tok.Token + "?download=true"
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonURL("▶️ "+label, viewURL),
 				tgbotapi.NewInlineKeyboardButtonURL("📥", dlURL),

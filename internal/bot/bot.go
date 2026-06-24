@@ -145,8 +145,8 @@ func (b *Bot) sendFileCard(chatID int64, name, token string) {
 	msg.DisableWebPagePreview = true
 
 	if b.isPublic() {
-		viewURL := b.cfg.BaseURL + "/f/" + token
-		dlURL := b.cfg.BaseURL + "/f/" + token + "?download=true"
+		viewURL := b.cfg.LinkBase() + "/f/" + token
+		dlURL := b.cfg.LinkBase() + "/f/" + token + "?download=true"
 		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonURL("▶️ Смотреть", viewURL),
