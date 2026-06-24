@@ -32,7 +32,7 @@ func New(
 
 	mux := http.NewServeMux()
 
-	qh := &handler.QueueHandler{Jobs: jobs, Pool: pool}
+	qh := &handler.QueueHandler{Jobs: jobs, Tags: tags, Pool: pool, Cfg: cfg}
 	mh := &handler.MediaHandler{
 		Jobs: jobs, Files: files, Tags: tags,
 		Tokens: tokens, Storage: store,

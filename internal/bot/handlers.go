@@ -8,8 +8,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/dr-duke/talmorGo/internal/downloader"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/repo"
 )
@@ -112,39 +114,51 @@ func (b *Bot) handleURL(ctx context.Context, msg *tgbotapi.Message) {
 		return
 	}
 
+	dlOpts := downloader.Options{
+		Binary:   b.cfg.YtDlpBinary,
+		Proxy:    b.cfg.YtDlpProxy,
+		MaxFiles: b.cfg.YtDlpMaxFilesPerRequest,
+		Timeout:  time.Duration(b.cfg.YtDlpTimeout) * time.Second,
+	}
+
 	var added, invalid int
 	for _, part := range strings.Fields(text) {
 		if _, err := url.ParseRequestURI(part); err != nil {
 			invalid++
 			continue
 		}
-		job := &model.Job{
-			URL:    part,
-			Status: model.JobPending,
-			Source: "telegram",
-			ChatID: msg.Chat.ID,
-		}
-		if err := b.jobs.Create(ctx, job); err != nil {
-			slog.Error("bot: create job", "err", err)
-			continue
-		}
 
-		// Отправляем сообщение очереди и сохраняем его ID для последующего редактирования.
-		stopKb := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🛑 Отменить", "stop:"+job.ID),
-			),
-		)
-		msgID := b.sendMarkup(msg.Chat.ID,
-			"⏳ <b>В очереди</b>\n"+escapeHTML(shortenMsg(part)),
-			&stopKb,
-		)
-		if msgID != 0 {
-			b.jobs.SetTgMessageID(ctx, job.ID, msgID) //nolint:errcheck
+		if info := downloader.FetchPlaylist(ctx, part, dlOpts); info != nil {
+			// Плейлист — создаём отдельный job на каждое видео.
+			n := b.createPlaylistJobs(ctx, msg.Chat.ID, part, info)
+			added += n
+		} else {
+			// Одиночное видео — текущее поведение с анимированным сообщением.
+			job := &model.Job{
+				URL:    part,
+				Status: model.JobPending,
+				Source: "telegram",
+				ChatID: msg.Chat.ID,
+			}
+			if err := b.jobs.Create(ctx, job); err != nil {
+				slog.Error("bot: create job", "err", err)
+				continue
+			}
+			stopKb := tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("🛑 Отменить", "stop:"+job.ID),
+				),
+			)
+			msgID := b.sendMarkup(msg.Chat.ID,
+				"⏳ <b>В очереди</b>\n"+escapeHTML(shortenMsg(part)),
+				&stopKb,
+			)
+			if msgID != 0 {
+				b.jobs.SetTgMessageID(ctx, job.ID, msgID) //nolint:errcheck
+			}
+			added++
 		}
-
 		b.pool.Enqueue()
-		added++
 	}
 
 	if added == 0 {
@@ -152,6 +166,50 @@ func (b *Bot) handleURL(ctx context.Context, msg *tgbotapi.Message) {
 	} else if invalid > 0 {
 		b.send(msg.Chat.ID, fmt.Sprintf("⚠️ Пропущено (не URL): %d", invalid))
 	}
+}
+
+// createPlaylistJobs создаёт job'ы для каждого видео из плейлиста,
+// назначает тег с названием плейлиста и отправляет сводное сообщение.
+func (b *Bot) createPlaylistJobs(ctx context.Context, chatID int64, originalURL string, info *downloader.PlaylistInfo) int {
+	var tagID string
+	if info.PlaylistTitle != "" && b.tags != nil {
+		if tag, err := b.tags.Upsert(ctx, info.PlaylistTitle); err == nil {
+			tagID = tag.ID
+		}
+	}
+
+	created := 0
+	for _, entry := range info.Entries {
+		job := &model.Job{
+			URL:    entry.URL,
+			Title:  entry.Title,
+			Status: model.JobPending,
+			Source: "telegram",
+			ChatID: chatID,
+		}
+		if err := b.jobs.Create(ctx, job); err != nil {
+			slog.Error("bot: create playlist job", "url", entry.URL, "err", err)
+			continue
+		}
+		if tagID != "" && b.tags != nil {
+			b.tags.AddToJob(ctx, job.ID, tagID) //nolint:errcheck
+		}
+		created++
+	}
+
+	if created == 0 {
+		return 0
+	}
+
+	// Одно сводное сообщение вместо N отдельных.
+	title := info.PlaylistTitle
+	if title == "" {
+		title = shortenMsg(originalURL)
+	}
+	text := fmt.Sprintf("📋 <b>%s</b>\n⏳ Добавлено в очередь: <b>%d</b> видео",
+		escapeHTML(title), created)
+	b.send(chatID, text)
+	return created
 }
 
 // handleCallback обрабатывает нажатие inline-кнопок.

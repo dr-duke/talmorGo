@@ -46,7 +46,7 @@ func main() {
 
 	pool := worker.NewPool(cfg, jobRepo, fileRepo, tokenRepo, nil)
 
-	tgBot, err := bot.New(cfg, jobRepo, fileRepo, tokenRepo, pool)
+	tgBot, err := bot.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, pool)
 	if err != nil {
 		slog.Error("bot init", "err", err)
 		os.Exit(1)
