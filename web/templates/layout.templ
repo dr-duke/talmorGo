@@ -284,6 +284,8 @@ templ Layout(title string, basePath string) {
 					width: min(96vw, 860px); max-height: 86vh;
 					overflow: hidden; margin: auto;
 					box-shadow: 0 8px 48px rgba(0,0,0,.6);
+				}
+				dialog#log-dialog[open] {
 					display: flex; flex-direction: column;
 				}
 				dialog#log-dialog::backdrop { background: var(--m3-scrim); }
