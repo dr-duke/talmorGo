@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -35,13 +36,19 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		b.send(msg.Chat.ID,
 			"📋 <b>Команды:</b>\n"+
 				"/status — статус очереди\n"+
-				"/queue — активные задачи\n\n"+
+				"/queue — активные задачи\n"+
+				"/last [N] — последние N файлов (по умолчанию 5)\n"+
+				"/search запрос — поиск по файлам, URL и тегам\n\n"+
 				"Просто отправь ссылку, чтобы поставить в очередь.\n"+
 				"Можно отправить несколько ссылок через пробел.")
 	case "status":
 		b.handleStatus(ctx, msg.Chat.ID)
 	case "queue":
 		b.handleQueue(ctx, msg.Chat.ID)
+	case "search":
+		b.handleSearch(ctx, msg.Chat.ID, msg.CommandArguments())
+	case "last":
+		b.handleLast(ctx, msg.Chat.ID, msg.CommandArguments())
 	default:
 		b.send(msg.Chat.ID, "Неизвестная команда. Отправь /help")
 	}
@@ -182,6 +189,107 @@ func (b *Bot) handleCallback(ctx context.Context, cq *tgbotapi.CallbackQuery) {
 	default:
 		b.answerCallback(cq.ID, "")
 	}
+}
+
+func (b *Bot) handleSearch(ctx context.Context, chatID int64, args string) {
+	q := strings.TrimSpace(args)
+	if q == "" {
+		b.send(chatID, "Использование: /search <запрос>")
+		return
+	}
+	items, err := b.jobs.SearchMedia(ctx, q)
+	if err != nil {
+		b.send(chatID, "Ошибка поиска")
+		return
+	}
+	if len(items) == 0 {
+		b.send(chatID, fmt.Sprintf("🔍 По запросу «%s» ничего не найдено", q))
+		return
+	}
+	b.sendMediaList(ctx, chatID,
+		fmt.Sprintf("🔍 По запросу «%s» найдено %d:", q, len(items)),
+		items)
+}
+
+func (b *Bot) handleLast(ctx context.Context, chatID int64, args string) {
+	n := 5
+	if s := strings.TrimSpace(args); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			n = v
+		}
+	}
+	if n > 20 {
+		n = 20
+	}
+	items, err := b.jobs.LastMedia(ctx, n)
+	if err != nil {
+		b.send(chatID, "Ошибка получения списка")
+		return
+	}
+	if len(items) == 0 {
+		b.send(chatID, "Скачанных файлов пока нет")
+		return
+	}
+	b.sendMediaList(ctx, chatID,
+		fmt.Sprintf("📼 Последние %d файлов:", len(items)),
+		items)
+}
+
+// sendMediaList отправляет нумерованный список с inline-кнопками для каждого доступного файла.
+func (b *Bot) sendMediaList(ctx context.Context, chatID int64, header string, items []*model.MediaItem) {
+	var sb strings.Builder
+	sb.WriteString(header + "\n")
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for i, item := range items {
+		title := shortenURL(item.DisplayTitle())
+		tags := ""
+		if len(item.Tags) > 0 {
+			tags = " · 🏷 " + strings.Join(item.Tags, ", ")
+		}
+		domain := item.Job.Domain()
+		sb.WriteString(fmt.Sprintf("\n%d. <b>%s</b>\n   🌐 %s%s\n",
+			i+1, escapeHTML(title), domain, tags))
+
+		if item.File == nil || !item.File.IsAvailable() {
+			continue
+		}
+		tok, err := b.tokens.Upsert(ctx, item.File.ID)
+		if err != nil {
+			slog.Error("bot: upsert token", "file_id", item.File.ID, "err", err)
+			continue
+		}
+		label := fmt.Sprintf("%d. %s", i+1, truncate(item.DisplayTitle(), 18))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("▶️ "+label, "view:"+tok.Token),
+			tgbotapi.NewInlineKeyboardButtonData("📥", "dl:"+tok.Token),
+		))
+	}
+
+	msg := tgbotapi.NewMessage(chatID, sb.String())
+	msg.ParseMode = tgbotapi.ModeHTML
+	msg.DisableWebPagePreview = true
+	if len(rows) > 0 {
+		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	}
+	if _, err := b.api.Send(msg); err != nil {
+		slog.Error("bot: send media list", "err", err)
+	}
+}
+
+func truncate(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max-1]) + "…"
+}
+
+func escapeHTML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
 }
 
 func (b *Bot) isAllowed(chatID int64) bool {

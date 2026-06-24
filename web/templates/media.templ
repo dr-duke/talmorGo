@@ -72,7 +72,7 @@ templ mediaRow(item *model.MediaItem) {
 		data-tags={ joinTags(item.Tags) }
 		data-status={ item.EffectiveStatus() }
 		if item.File != nil && item.File.IsAvailable() {
-			data-stream={ fmt.Sprintf("files/%s/stream", item.Job.FileID) }
+			data-stream={ fmt.Sprintf("files/%s/stream", item.File.ID) }
 			onclick="openPlayer(this.dataset.stream, this.dataset.title)"
 			style="cursor:pointer"
 		}
@@ -125,25 +125,25 @@ templ mediaRow(item *model.MediaItem) {
 			if item.File != nil && item.File.IsAvailable() {
 				<button
 					class="m3-icon-btn"
-					data-stream={ fmt.Sprintf("files/%s/stream", item.Job.FileID) }
+					data-stream={ fmt.Sprintf("files/%s/stream", item.File.ID) }
 					data-title={ item.DisplayTitle() }
 					onclick="openPlayer(this.dataset.stream, this.dataset.title)"
 					title="Смотреть"
 				><span class="m3-icon">play_circle</span></button>
 				<a
 					class="m3-icon-btn"
-					href={ templ.SafeURL(fmt.Sprintf("files/%s/stream", item.Job.FileID)) }
+					href={ templ.SafeURL(fmt.Sprintf("files/%s/stream", item.File.ID)) }
 					target="_blank"
 					title="Открыть в новой вкладке"
 				><span class="m3-icon">open_in_new</span></a>
 				<a
 					class="m3-icon-btn"
-					href={ templ.SafeURL(fmt.Sprintf("files/%s/stream?download=true", item.Job.FileID)) }
+					href={ templ.SafeURL(fmt.Sprintf("files/%s/stream?download=true", item.File.ID)) }
 					title="Скачать"
 				><span class="m3-icon">download</span></a>
 				<button
 					class="m3-icon-btn"
-					data-file-id={ item.Job.FileID }
+					data-file-id={ item.File.ID }
 					onclick="copyPresigned(this.dataset.fileId, this)"
 					title="Постоянная ссылка"
 				><span class="m3-icon">link</span></button>
@@ -157,7 +157,7 @@ templ mediaRow(item *model.MediaItem) {
 			if item.File != nil && item.File.IsAvailable() {
 				<button
 					class="m3-icon-btn"
-					data-file-id={ item.Job.FileID }
+					data-file-id={ item.File.ID }
 					data-name={ item.File.Name }
 					onclick="renamePrompt(this.dataset.fileId, this.dataset.name)"
 					title="Переименовать"
@@ -193,7 +193,7 @@ templ mediaRow(item *model.MediaItem) {
 			if item.File != nil {
 				<button
 					class="m3-icon-btn m3-icon-btn-danger"
-					hx-delete={ fmt.Sprintf("files/%s", item.Job.FileID) }
+					hx-delete={ fmt.Sprintf("files/%s", item.File.ID) }
 					hx-target="#media-inner"
 					hx-swap="outerHTML"
 					hx-confirm={ fmt.Sprintf("Удалить %s?", item.DisplayTitle()) }

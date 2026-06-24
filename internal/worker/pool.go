@@ -120,11 +120,18 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 
 	var firstFile *model.File
 	var lastErr error
+	fileCount := 0
+	maxFiles := p.cfg.YtDlpMaxFilesPerRequest
 
 	for event := range downloader.Run(ctx, job.URL, opts) {
 		if event.Err != nil {
 			lastErr = event.Err
 			slog.Error("worker: download event error", "job", job.ID, "err", event.Err)
+			continue
+		}
+
+		if maxFiles > 0 && fileCount >= maxFiles {
+			slog.Warn("worker: max files per request reached, skipping", "job", job.ID, "limit", maxFiles)
 			continue
 		}
 
@@ -135,15 +142,17 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		}
 
 		f := &model.File{
-			Path: event.Path,
-			Name: event.FileName,
-			Size: info.Size(),
+			JobID: job.ID,
+			Path:  event.Path,
+			Name:  event.FileName,
+			Size:  info.Size(),
 		}
 		if err := p.fileRepo.Create(ctx, f); err != nil {
 			slog.Error("worker: save file record", "err", err)
 			continue
 		}
 		slog.Info("worker: file saved", "name", f.Name, "id", f.ID)
+		fileCount++
 		if firstFile == nil {
 			firstFile = f
 		}

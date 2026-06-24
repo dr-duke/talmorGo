@@ -49,6 +49,7 @@ func (j *Job) Domain() string {
 
 type File struct {
 	ID        string
+	JobID     string
 	Path      string
 	Name      string
 	Size      int64

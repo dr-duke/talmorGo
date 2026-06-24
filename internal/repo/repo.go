@@ -16,6 +16,10 @@ type JobRepo interface {
 	List(ctx context.Context, f JobFilter) ([]*model.Job, error)
 	// ListMedia возвращает объединённое представление заданий + файлов + тегов.
 	ListMedia(ctx context.Context) ([]*model.MediaItem, error)
+	// SearchMedia ищет по имени файла, URL, домену и тегам (LIKE).
+	SearchMedia(ctx context.Context, query string) ([]*model.MediaItem, error)
+	// LastMedia возвращает последние n успешно скачанных доступных файлов.
+	LastMedia(ctx context.Context, n int) ([]*model.MediaItem, error)
 	ClaimNext(ctx context.Context) (*model.Job, error)
 	Update(ctx context.Context, job *model.Job) error
 	Delete(ctx context.Context, id string) error
@@ -30,6 +34,7 @@ type FileRepo interface {
 	GetByID(ctx context.Context, id string) (*model.File, error)
 	List(ctx context.Context) ([]*model.File, error)
 	ListAll(ctx context.Context) ([]*model.File, error) // включая удалённые/потерянные
+	ListByJobID(ctx context.Context, jobID string) ([]*model.File, error)
 	ListDeleted(ctx context.Context) ([]*model.DeletedFile, error)
 	Rename(ctx context.Context, id, newName, newPath string) error
 	Delete(ctx context.Context, id string) error

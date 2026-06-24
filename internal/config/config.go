@@ -43,6 +43,9 @@ type Config struct {
 
 	// File health check (секунды между проверками)
 	FileCheckInterval int `long:"file-check-interval" env:"FILE_CHECK_INTERVAL" default:"300"`
+
+	// Максимум файлов на один запрос (плейлист/канал)
+	YtDlpMaxFilesPerRequest int `long:"ytdlp-max-files" env:"YT_DLP_MAX_FILES_PER_REQUEST" default:"100"`
 }
 
 // ExtraArgsList возвращает YT_DLP_EXTRA_ARGS как слайс строк.

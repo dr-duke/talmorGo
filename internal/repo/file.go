@@ -25,14 +25,15 @@ func (r *sqliteFileRepo) Create(ctx context.Context, f *model.File) error {
 	f.CreatedAt = time.Now().UTC()
 
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO files (id, path, name, size, created_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO files (id, job_id, path, name, size, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
+			job_id     = excluded.job_id,
 			name       = excluded.name,
 			size       = excluded.size,
 			deleted_at = NULL,
 			lost_at    = NULL
-	`, f.ID, f.Path, f.Name, f.Size, f.CreatedAt.Format(time.RFC3339Nano))
+	`, f.ID, nullStr(f.JobID), f.Path, f.Name, f.Size, f.CreatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}
@@ -50,13 +51,13 @@ func (r *sqliteFileRepo) Create(ctx context.Context, f *model.File) error {
 
 func (r *sqliteFileRepo) GetByID(ctx context.Context, id string) (*model.File, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, path, name, size, created_at, deleted_at, lost_at FROM files WHERE id=?`, id)
+		`SELECT id, COALESCE(job_id,''), path, name, size, created_at, deleted_at, lost_at FROM files WHERE id=?`, id)
 	return scanFile(row)
 }
 
 func (r *sqliteFileRepo) List(ctx context.Context) ([]*model.File, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, path, name, size, created_at, deleted_at, lost_at
+		`SELECT id, COALESCE(job_id,''), path, name, size, created_at, deleted_at, lost_at
 		 FROM files WHERE deleted_at IS NULL ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -68,7 +69,19 @@ func (r *sqliteFileRepo) List(ctx context.Context) ([]*model.File, error) {
 // ListAll возвращает все файлы (включая удалённые/потерянные) для проверки файловой системы.
 func (r *sqliteFileRepo) ListAll(ctx context.Context) ([]*model.File, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, path, name, size, created_at, deleted_at, lost_at FROM files ORDER BY created_at DESC`)
+		`SELECT id, COALESCE(job_id,''), path, name, size, created_at, deleted_at, lost_at FROM files ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanFiles(rows)
+}
+
+// ListByJobID возвращает все файлы (включая удалённые) привязанные к заданию.
+func (r *sqliteFileRepo) ListByJobID(ctx context.Context, jobID string) ([]*model.File, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, COALESCE(job_id,''), path, name, size, created_at, deleted_at, lost_at
+		 FROM files WHERE job_id=? ORDER BY created_at ASC`, jobID)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +170,7 @@ func scanFile(s scanner) (*model.File, error) {
 	var f model.File
 	var createdAt string
 	var deletedAt, lostAt sql.NullString
-	err := s.Scan(&f.ID, &f.Path, &f.Name, &f.Size, &createdAt, &deletedAt, &lostAt)
+	err := s.Scan(&f.ID, &f.JobID, &f.Path, &f.Name, &f.Size, &createdAt, &deletedAt, &lostAt)
 	if err != nil {
 		return nil, err
 	}

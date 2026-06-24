@@ -119,17 +119,17 @@ func (h *MediaHandler) CreateLink(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"url": h.BaseURL + "/f/" + tok.Token}) //nolint:errcheck
 }
 
-// Redownload сбрасывает задание в pending и удаляет файл для повторной закачки.
+// Redownload сбрасывает задание в pending, удаляет все его файлы для повторной закачки.
 func (h *MediaHandler) Redownload(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")
-	job, err := h.Jobs.GetByID(r.Context(), jobID)
-	if err != nil {
+	if _, err := h.Jobs.GetByID(r.Context(), jobID); err != nil {
 		http.Error(w, "job not found", http.StatusNotFound)
 		return
 	}
-	if job.FileID != "" {
-		if f, err := h.Files.GetByID(r.Context(), job.FileID); err == nil {
-			os.Remove(f.Path) //nolint:errcheck
+	// Удаляем все файлы этого задания (в т.ч. файлы плейлиста).
+	if files, err := h.Files.ListByJobID(r.Context(), jobID); err == nil {
+		for _, f := range files {
+			os.Remove(f.Path)                 //nolint:errcheck
 			h.Files.Delete(r.Context(), f.ID) //nolint:errcheck
 		}
 	}
