@@ -40,6 +40,9 @@ type Config struct {
 	// Retry backoff
 	RetryBackoffBase    int `long:"retry-backoff-base" env:"RETRY_BACKOFF_BASE" default:"30"`
 	RetryMaxDuration    int `long:"retry-max-duration" env:"RETRY_MAX_DURATION" default:"86400"`
+
+	// File health check (секунды между проверками)
+	FileCheckInterval int `long:"file-check-interval" env:"FILE_CHECK_INTERVAL" default:"300"`
 }
 
 // ExtraArgsList возвращает YT_DLP_EXTRA_ARGS как слайс строк.

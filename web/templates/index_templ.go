@@ -41,13 +41,13 @@ func Index(basePath string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<nav class=\"tabs\" id=\"tab-nav\"><button class=\"tab-btn active\" id=\"tab-queue\" hx-get=\"queue\" hx-target=\"#content\" hx-swap=\"innerHTML\" onclick=\"switchTab('queue')\">📋 Очередь</button> <button class=\"tab-btn\" id=\"tab-files\" hx-get=\"files\" hx-target=\"#content\" hx-swap=\"innerHTML\" onclick=\"switchTab('files')\">📁 Файлы</button></nav><div id=\"content\" hx-get=\"queue\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div><script>\n\t\t\tfunction switchTab(name) {\n\t\t\t\tdocument.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));\n\t\t\t\tdocument.getElementById('tab-' + name).classList.add('active');\n\t\t\t}\n\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(evt) {\n\t\t\t\tvar url = evt.detail.requestConfig && evt.detail.requestConfig.path;\n\t\t\t\tif (!url) return;\n\t\t\t\tif (url.includes('/files')) switchTab('files');\n\t\t\t\telse if (url.includes('/queue')) switchTab('queue');\n\t\t\t});\n\t\t</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"content\" hx-get=\"media\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Главная", basePath).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Медиатека", basePath).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -24,23 +24,27 @@ func New(
 	jobs repo.JobRepo,
 	files repo.FileRepo,
 	tokens repo.TokenRepo,
+	tags repo.TagRepo,
 	store *storage.Storage,
 	pool handler.Enqueuer,
 ) *Server {
-	// basePath — нормализованный префикс без trailing slash (напр. "/talmor" или "").
 	basePath := strings.TrimRight(cfg.BasePath, "/")
 
 	mux := http.NewServeMux()
 
 	qh := &handler.QueueHandler{Jobs: jobs, Pool: pool}
-	fh := &handler.FilesHandler{Files: files, Tokens: tokens, Storage: store, BaseURL: cfg.BaseURL}
+	mh := &handler.MediaHandler{
+		Jobs: jobs, Files: files, Tags: tags,
+		Tokens: tokens, Storage: store,
+		BaseURL: cfg.BaseURL, Pool: pool,
+	}
 	lh := &handler.LinkHandler{Tokens: tokens, Files: files}
 
 	// Статика.
 	staticSub, _ := fs.Sub(web.StaticFiles, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 
-	// Главная страница — передаём basePath шаблону для <base href>.
+	// Главная страница.
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -49,26 +53,27 @@ func New(
 		templ.Handler(templates.Index(basePath)).ServeHTTP(w, r)
 	})
 
-	// Queue
-	mux.HandleFunc("GET /queue", qh.Page)
-	mux.HandleFunc("GET /queue/list", qh.List)
+	// Медиатека — объединённый список (заменяет /queue + /files).
+	mux.HandleFunc("GET /media", mh.Page)
+	mux.HandleFunc("GET /media/list", mh.List)
+	mux.HandleFunc("GET /files/deleted", mh.ListDeleted)
+	mux.HandleFunc("GET /files/{id}/stream", mh.Stream)
+	mux.HandleFunc("DELETE /files/{id}", mh.Delete)
+	mux.HandleFunc("PATCH /files/{id}", mh.Rename)
+	mux.HandleFunc("POST /files/{id}/link", mh.CreateLink)
+	mux.HandleFunc("POST /jobs/{id}/redownload", mh.Redownload)
+	mux.HandleFunc("POST /jobs/{id}/tags", mh.AddTag)
+	mux.HandleFunc("DELETE /jobs/{id}/tags/{tag}", mh.RemoveTag)
+
+	// Очередь — добавление и управление.
 	mux.HandleFunc("POST /queue", qh.Add)
 	mux.HandleFunc("DELETE /queue/{id}", qh.Delete)
 	mux.HandleFunc("POST /jobs/{id}/retry", qh.Retry)
 
-	// Files
-	mux.HandleFunc("GET /files", fh.Page)
-	mux.HandleFunc("GET /files/list", fh.List)
-	mux.HandleFunc("GET /files/deleted", fh.ListDeleted)
-	mux.HandleFunc("GET /files/{id}/stream", fh.Stream)
-	mux.HandleFunc("DELETE /files/{id}", fh.Delete)
-	mux.HandleFunc("PATCH /files/{id}", fh.Rename)
-	mux.HandleFunc("POST /files/{id}/link", fh.CreateLink)
-
 	// Presigned link (публичный, без auth).
 	mux.HandleFunc("GET /f/{token}", lh.Resolve)
 
-	// Health
+	// Health.
 	if cfg.HealthEndpoint != "" {
 		mux.HandleFunc("GET "+cfg.HealthEndpoint, handler.Health)
 	}
@@ -78,18 +83,14 @@ func New(
 		h = authMiddleware(cfg.WebToken, mux)
 	}
 
-	// Если задан basePath, оборачиваем: внешний mux снимает префикс и отдаёт внутреннему.
 	if basePath != "" {
 		outer := http.NewServeMux()
-		// Health endpoint регистрируем на внешнем mux — k8s liveness probe ходит без префикса.
 		if cfg.HealthEndpoint != "" {
 			outer.HandleFunc("GET "+cfg.HealthEndpoint, handler.Health)
 		}
-		// Редирект /talmor → /talmor/
 		outer.HandleFunc("GET "+basePath, func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, basePath+"/", http.StatusMovedPermanently)
 		})
-		// Все запросы /talmor/* — снимаем prefix и передаём внутреннему handler.
 		outer.Handle(basePath+"/", http.StripPrefix(basePath, h))
 		h = outer
 	}
@@ -103,7 +104,6 @@ func (s *Server) Handler() http.Handler {
 
 func authMiddleware(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Presigned-ссылки публичны.
 		if strings.HasPrefix(r.URL.Path, "/f/") {
 			next.ServeHTTP(w, r)
 			return

@@ -74,6 +74,97 @@ func (r *sqliteJobRepo) List(ctx context.Context, f JobFilter) ([]*model.Job, er
 	return jobs, rows.Err()
 }
 
+// ListMedia возвращает все задания вместе с файлами и тегами.
+func (r *sqliteJobRepo) ListMedia(ctx context.Context) ([]*model.MediaItem, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+			j.id, j.url, j.status, j.title, COALESCE(j.file_id,''), j.error, j.source, j.chat_id,
+			j.created_at, j.updated_at, j.retry_count, j.next_retry_at, j.first_failed_at,
+			f.id, f.name, f.size, f.path, f.created_at, f.deleted_at, f.lost_at,
+			GROUP_CONCAT(t.name, '|') as tag_names
+		FROM jobs j
+		LEFT JOIN files f ON f.id = j.file_id
+		LEFT JOIN job_tags jt ON jt.job_id = j.id
+		LEFT JOIN tags t ON t.id = jt.tag_id
+		GROUP BY j.id
+		ORDER BY j.created_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []*model.MediaItem
+	for rows.Next() {
+		item, err := scanMediaItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func scanMediaItem(s scanner) (*model.MediaItem, error) {
+	var j model.Job
+	var createdAt, updatedAt string
+	var nextRetryAt, firstFailedAt sql.NullString
+
+	var fileID, fileName, filePath, fileCreatedAt sql.NullString
+	var fileSize sql.NullInt64
+	var fileDeletedAt, fileLostAt sql.NullString
+	var tagNames sql.NullString
+
+	err := s.Scan(
+		&j.ID, &j.URL, &j.Status, &j.Title, &j.FileID, &j.Error,
+		&j.Source, &j.ChatID, &createdAt, &updatedAt,
+		&j.RetryCount, &nextRetryAt, &firstFailedAt,
+		&fileID, &fileName, &fileSize, &filePath, &fileCreatedAt, &fileDeletedAt, &fileLostAt,
+		&tagNames,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	j.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	j.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+	if nextRetryAt.Valid && nextRetryAt.String != "" {
+		t, _ := time.Parse(time.RFC3339Nano, nextRetryAt.String)
+		j.NextRetryAt = &t
+	}
+	if firstFailedAt.Valid && firstFailedAt.String != "" {
+		t, _ := time.Parse(time.RFC3339Nano, firstFailedAt.String)
+		j.FirstFailedAt = &t
+	}
+
+	item := &model.MediaItem{Job: &j}
+
+	if fileID.Valid && fileID.String != "" {
+		f := &model.File{
+			ID:   fileID.String,
+			Name: fileName.String,
+			Size: fileSize.Int64,
+			Path: filePath.String,
+		}
+		f.CreatedAt, _ = time.Parse(time.RFC3339Nano, fileCreatedAt.String)
+		if fileDeletedAt.Valid && fileDeletedAt.String != "" {
+			t, _ := time.Parse(time.RFC3339Nano, fileDeletedAt.String)
+			f.DeletedAt = &t
+		}
+		if fileLostAt.Valid && fileLostAt.String != "" {
+			t, _ := time.Parse(time.RFC3339Nano, fileLostAt.String)
+			f.LostAt = &t
+		}
+		item.File = f
+	}
+
+	if tagNames.Valid && tagNames.String != "" {
+		item.Tags = strings.Split(tagNames.String, "|")
+	}
+
+	return item, nil
+}
+
 // ClaimNext атомарно берёт ближайшую pending-задачу или retrying-задачу с наступившим временем повтора.
 func (r *sqliteJobRepo) ClaimNext(ctx context.Context) (*model.Job, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -125,7 +216,6 @@ func (r *sqliteJobRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// ResetFailed переводит failed-задачу обратно в pending с обнулением счётчиков retry.
 func (r *sqliteJobRepo) ResetFailed(ctx context.Context, id string) error {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE jobs SET status='pending', error='', retry_count=0, next_retry_at=NULL, first_failed_at=NULL, updated_at=?
@@ -142,6 +232,17 @@ func (r *sqliteJobRepo) ResetFailed(ctx context.Context, id string) error {
 	return nil
 }
 
+// Redownload сбрасывает задание в pending, очищает file_id и счётчики retry.
+func (r *sqliteJobRepo) Redownload(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE jobs SET status='pending', file_id=NULL, title='', error='',
+		  retry_count=0, next_retry_at=NULL, first_failed_at=NULL, updated_at=?
+		 WHERE id=?`,
+		time.Now().UTC().Format(time.RFC3339Nano), id,
+	)
+	return err
+}
+
 func (r *sqliteJobRepo) ResetStale(ctx context.Context) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE jobs SET status='pending', updated_at=? WHERE status='running'`,
@@ -150,7 +251,6 @@ func (r *sqliteJobRepo) ResetStale(ctx context.Context) error {
 	return err
 }
 
-// scanner объединяет *sql.Row и *sql.Rows для переиспользования scanJob.
 type scanner interface {
 	Scan(dest ...any) error
 }

@@ -6,10 +6,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/repo"
-	"github.com/dr-duke/talmorGo/web/templates"
 )
 
 type Enqueuer interface {
@@ -21,36 +19,7 @@ type QueueHandler struct {
 	Pool Enqueuer
 }
 
-// Page возвращает полную вкладку очереди (tab switching).
-func (h *QueueHandler) Page(w http.ResponseWriter, r *http.Request) {
-	jobs, err := h.listJobs(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	templ.Handler(templates.QueueTab(jobs)).ServeHTTP(w, r)
-}
-
-// List возвращает только внутренний фрагмент списка (HTMX polling).
-func (h *QueueHandler) List(w http.ResponseWriter, r *http.Request) {
-	jobs, err := h.listJobs(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	templ.Handler(templates.QueueList(jobs)).ServeHTTP(w, r)
-}
-
-func (h *QueueHandler) listJobs(r *http.Request) ([]*model.Job, error) {
-	return h.Jobs.List(r.Context(), repo.JobFilter{
-		Statuses: []model.JobStatus{
-			model.JobPending, model.JobRunning, model.JobRetrying,
-			model.JobFailed, model.JobDone,
-		},
-	})
-}
-
-// Add добавляет URL(ы) в очередь. Принимает form или JSON: {"url": "..."}.
+// Add добавляет URL(ы) в очередь.
 func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 	rawURL := ""
 	ct := r.Header.Get("Content-Type")
@@ -88,7 +57,10 @@ func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Pool.Enqueue()
-	h.List(w, r)
+
+	// Возвращаем обновлённый media-список (HTMX target = #media-inner).
+	w.Header().Set("HX-Trigger", "mediaRefresh")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Delete отменяет pending-задачу.
@@ -98,10 +70,11 @@ func (h *QueueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	h.List(w, r)
+	w.Header().Set("HX-Trigger", "mediaRefresh")
+	w.WriteHeader(http.StatusNoContent)
 }
 
-// Retry переводит failed-задачу обратно в pending для повторного скачивания.
+// Retry переводит failed-задачу обратно в pending.
 func (h *QueueHandler) Retry(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := h.Jobs.ResetFailed(r.Context(), id); err != nil {
@@ -109,5 +82,6 @@ func (h *QueueHandler) Retry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Pool.Enqueue()
-	h.List(w, r)
+	w.Header().Set("HX-Trigger", "mediaRefresh")
+	w.WriteHeader(http.StatusNoContent)
 }

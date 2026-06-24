@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"net/url"
+	"time"
+)
 
 type JobStatus string
 
@@ -28,12 +31,20 @@ type Job struct {
 	FirstFailedAt *time.Time
 }
 
-// DisplayName возвращает title, если он уже известен, иначе URL.
 func (j *Job) DisplayName() string {
 	if j.Title != "" {
 		return j.Title
 	}
 	return j.URL
+}
+
+// Domain извлекает hostname из URL задания.
+func (j *Job) Domain() string {
+	u, err := url.Parse(j.URL)
+	if err != nil || u.Host == "" {
+		return j.URL
+	}
+	return u.Hostname()
 }
 
 type File struct {
@@ -43,18 +54,63 @@ type File struct {
 	Size      int64
 	CreatedAt time.Time
 	DeletedAt *time.Time
+	LostAt    *time.Time
 }
 
-// DeletedFile — представление удалённого файла для API-эндпоинта.
+func (f *File) IsLost() bool    { return f.LostAt != nil }
+func (f *File) IsDeleted() bool { return f.DeletedAt != nil }
+func (f *File) IsAvailable() bool {
+	return f.DeletedAt == nil && f.LostAt == nil
+}
+
+// MediaItem — объединённое представление задания и (опционально) файла.
+type MediaItem struct {
+	Job  *Job
+	File *File  // nil пока файл не скачан
+	Tags []string
+}
+
+// EffectiveStatus возвращает статус с учётом состояния файла.
+func (m *MediaItem) EffectiveStatus() string {
+	if m.File != nil && m.File.LostAt != nil {
+		return "lost"
+	}
+	if m.File != nil && m.File.DeletedAt != nil {
+		return "deleted"
+	}
+	return string(m.Job.Status)
+}
+
+// DisplayTitle возвращает имя файла или заголовок задания.
+func (m *MediaItem) DisplayTitle() string {
+	if m.File != nil && m.File.IsAvailable() {
+		return m.File.Name
+	}
+	if m.Job.Title != "" {
+		return m.Job.Title
+	}
+	u := m.Job.URL
+	if len(u) > 70 {
+		return u[:67] + "…"
+	}
+	return u
+}
+
+// DeletedFile — для GET /files/deleted API.
 type DeletedFile struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	OriginalURL string     `json:"original_url"`
-	DeletedAt   time.Time  `json:"deleted_at"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	OriginalURL string    `json:"original_url"`
+	DeletedAt   time.Time `json:"deleted_at"`
 }
 
 type Token struct {
 	Token     string
 	FileID    string
 	CreatedAt time.Time
+}
+
+type Tag struct {
+	ID   string
+	Name string
 }

@@ -31,7 +31,6 @@ func main() {
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
-	// База данных
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		slog.Error("db open", "path", cfg.DBPath, "err", err)
@@ -40,31 +39,28 @@ func main() {
 	defer database.Close()
 	slog.Info("db opened", "path", cfg.DBPath)
 
-	// Репозитории
 	jobRepo := repo.NewJobRepo(database)
 	fileRepo := repo.NewFileRepo(database)
 	tokenRepo := repo.NewTokenRepo(database)
+	tagRepo := repo.NewTagRepo(database)
 
-	// Worker pool (notifier подключим после инициализации бота)
 	pool := worker.NewPool(cfg, jobRepo, fileRepo, tokenRepo, nil)
 
-	// Telegram-бот (получает pool как Enqueuer)
 	tgBot, err := bot.New(cfg, jobRepo, fileRepo, tokenRepo, pool)
 	if err != nil {
 		slog.Error("bot init", "err", err)
 		os.Exit(1)
 	}
-
-	// Теперь замыкаем цикл: пул умеет уведомлять через бота
 	pool.SetNotifier(tgBot)
 
-	// Хранилище и HTTP-сервер
 	store := storage.New(cfg.YtDlpOutputDir)
-	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, store, pool)
+	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, store, pool)
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPHost + ":" + cfg.HTTPPort,
 		Handler: srv.Handler(),
 	}
+
+	checker := worker.NewFileChecker(fileRepo, cfg.FileCheckInterval)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -78,6 +74,7 @@ func main() {
 
 	go pool.Start(ctx)
 	go tgBot.Start(ctx)
+	go checker.Start(ctx)
 
 	<-ctx.Done()
 	slog.Info("shutting down…")

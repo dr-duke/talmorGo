@@ -1,0 +1,258 @@
+package templates
+
+import (
+	"fmt"
+	"time"
+	"github.com/dr-duke/talmorGo/internal/model"
+)
+
+templ MediaTab(items []*model.MediaItem, tags []*model.Tag) {
+	<form class="add-form" hx-post="queue" hx-swap="none" hx-on::after-request="if(event.detail.successful)this.reset()">
+		<input
+			type="url"
+			name="url"
+			placeholder="Вставьте ссылку на видео…"
+			autocomplete="off"
+			required
+		/>
+		<button type="submit" class="m3-btn m3-btn-filled">
+			<span class="m3-icon">download</span>
+			Скачать
+		</button>
+	</form>
+	<div class="filter-bar">
+		<input
+			type="search"
+			id="media-search"
+			class="m3-search"
+			placeholder="Поиск по названию, URL, домену…"
+			oninput="applyFilters()"
+		/>
+		<div id="tag-filters" class="tag-filter-row">
+			for _, t := range tags {
+				<button
+					class="m3-chip"
+					data-tag={ t.Name }
+					onclick="toggleTagFilter(this)"
+				>{ t.Name }</button>
+			}
+		</div>
+	</div>
+	@MediaList(items, tags)
+}
+
+templ MediaList(items []*model.MediaItem, tags []*model.Tag) {
+	<div
+		id="media-inner"
+		hx-get="media/list"
+		hx-trigger="every 5s, mediaRefresh from:body"
+		hx-swap="outerHTML"
+	>
+		if len(items) == 0 {
+			<div class="m3-empty">
+				<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">video_library</span>
+				<p>Медиатека пуста</p>
+			</div>
+		} else {
+			<div class="media-list">
+				for _, item := range items {
+					@mediaRow(item)
+				}
+			</div>
+		}
+	</div>
+}
+
+templ mediaRow(item *model.MediaItem) {
+	<div
+		class={ "media-row", "status-" + item.EffectiveStatus() }
+		data-title={ item.DisplayTitle() }
+		data-url={ item.Job.URL }
+		data-domain={ item.Job.Domain() }
+		data-tags={ joinTags(item.Tags) }
+		data-status={ item.EffectiveStatus() }
+		if item.File != nil && item.File.IsAvailable() {
+			data-stream={ fmt.Sprintf("files/%s/stream", item.Job.FileID) }
+			onclick="openPlayer(this.dataset.stream, this.dataset.title)"
+			style="cursor:pointer"
+		}
+	>
+		<div class="media-source" title={ item.Job.Domain() }>
+			<img
+				class="favicon"
+				src={ fmt.Sprintf("https://www.google.com/s2/favicons?domain=%s&sz=16", item.Job.Domain()) }
+				width="16"
+				height="16"
+				onerror="this.style.visibility='hidden'"
+				loading="lazy"
+			/>
+			<span class="domain-label">{ shortDomain(item.Job.Domain()) }</span>
+		</div>
+		<div class="media-info">
+			<div class="media-title">{ item.DisplayTitle() }</div>
+			<div class="media-meta">
+				<span class={ "m3-badge", "badge-" + item.EffectiveStatus() }>{ statusLabel(item.EffectiveStatus()) }</span>
+				if item.File != nil && item.File.IsAvailable() {
+					<span class="meta-size">{ formatSize(item.File.Size) }</span>
+				}
+				if item.Job.Status == model.JobRetrying && item.Job.NextRetryAt != nil {
+					<span class="meta-retry">{ retryIn(item.Job.NextRetryAt) }</span>
+				}
+				<span class="tag-chips">
+					for _, tag := range item.Tags {
+						<span class="m3-chip m3-chip-sm">
+							{ tag }
+							<button
+								class="chip-remove"
+								hx-delete={ fmt.Sprintf("jobs/%s/tags/%s", item.Job.ID, tag) }
+								hx-target="#media-inner"
+								hx-swap="outerHTML"
+								onclick="event.stopPropagation()"
+								title="Убрать тег"
+							>✕</button>
+						</span>
+					}
+					<button
+						class="m3-chip m3-chip-add"
+						data-job-id={ item.Job.ID }
+						onclick="event.stopPropagation();addTag(this.dataset.jobId)"
+						title="Добавить тег"
+					>＋</button>
+				</span>
+			</div>
+		</div>
+		<div class="media-actions" onclick="event.stopPropagation()">
+			if item.File != nil && item.File.IsAvailable() {
+				<button
+					class="m3-icon-btn"
+					data-stream={ fmt.Sprintf("files/%s/stream", item.Job.FileID) }
+					data-title={ item.DisplayTitle() }
+					onclick="openPlayer(this.dataset.stream, this.dataset.title)"
+					title="Смотреть"
+				><span class="m3-icon">play_circle</span></button>
+				<a
+					class="m3-icon-btn"
+					href={ templ.SafeURL(fmt.Sprintf("files/%s/stream", item.Job.FileID)) }
+					target="_blank"
+					title="Открыть в новой вкладке"
+				><span class="m3-icon">open_in_new</span></a>
+				<a
+					class="m3-icon-btn"
+					href={ templ.SafeURL(fmt.Sprintf("files/%s/stream?download=true", item.Job.FileID)) }
+					title="Скачать"
+				><span class="m3-icon">download</span></a>
+				<button
+					class="m3-icon-btn"
+					data-file-id={ item.Job.FileID }
+					onclick="copyPresigned(this.dataset.fileId, this)"
+					title="Постоянная ссылка"
+				><span class="m3-icon">link</span></button>
+			}
+			<button
+				class="m3-icon-btn"
+				data-url={ item.Job.URL }
+				onclick="copyOriginalURL(this.dataset.url)"
+				title="Скопировать исходную ссылку"
+			><span class="m3-icon">content_copy</span></button>
+			if item.File != nil && item.File.IsAvailable() {
+				<button
+					class="m3-icon-btn"
+					data-file-id={ item.Job.FileID }
+					data-name={ item.File.Name }
+					onclick="renamePrompt(this.dataset.fileId, this.dataset.name)"
+					title="Переименовать"
+				><span class="m3-icon">edit</span></button>
+			}
+			if item.Job.Status == model.JobDone || item.EffectiveStatus() == "lost" || item.Job.Status == model.JobFailed {
+				<button
+					class="m3-icon-btn"
+					hx-post={ fmt.Sprintf("jobs/%s/redownload", item.Job.ID) }
+					hx-target="#media-inner"
+					hx-swap="outerHTML"
+					hx-confirm="Скачать заново?"
+					title="Скачать повторно"
+				><span class="m3-icon">refresh</span></button>
+			}
+			if item.Job.Status == model.JobPending {
+				<button
+					class="m3-icon-btn m3-icon-btn-danger"
+					hx-delete={ fmt.Sprintf("queue/%s", item.Job.ID) }
+					hx-swap="none"
+					hx-confirm="Отменить задачу?"
+					title="Отменить"
+				><span class="m3-icon">cancel</span></button>
+			}
+			if item.Job.Status == model.JobFailed {
+				<button
+					class="m3-icon-btn"
+					hx-post={ fmt.Sprintf("jobs/%s/retry", item.Job.ID) }
+					hx-swap="none"
+					title="Повторить"
+				><span class="m3-icon">replay</span></button>
+			}
+			if item.File != nil {
+				<button
+					class="m3-icon-btn m3-icon-btn-danger"
+					hx-delete={ fmt.Sprintf("files/%s", item.Job.FileID) }
+					hx-target="#media-inner"
+					hx-swap="outerHTML"
+					hx-confirm={ fmt.Sprintf("Удалить %s?", item.DisplayTitle()) }
+					title="Удалить файл"
+				><span class="m3-icon">delete</span></button>
+			}
+		</div>
+	</div>
+}
+
+func joinTags(tags []string) string {
+	out := ""
+	for i, t := range tags {
+		if i > 0 {
+			out += ","
+		}
+		out += t
+	}
+	return out
+}
+
+func shortDomain(d string) string {
+	if len(d) > 18 {
+		return d[:15] + "…"
+	}
+	return d
+}
+
+func statusLabel(s string) string {
+	switch s {
+	case "pending":
+		return "ожидание"
+	case "running":
+		return "скачивается"
+	case "retrying":
+		return "повтор"
+	case "done":
+		return "готово"
+	case "failed":
+		return "ошибка"
+	case "lost":
+		return "файл пропал"
+	case "deleted":
+		return "удалён"
+	default:
+		return s
+	}
+}
+
+func retryIn(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	d := time.Until(*t)
+	if d <= 0 {
+		return "скоро"
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("через %ds", int(d.Seconds()))
+	}
+	return fmt.Sprintf("через %dm", int(d.Minutes()))
+}

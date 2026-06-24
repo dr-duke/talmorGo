@@ -1,7 +1,5 @@
 package templates
 
-// baseHref вычисляет значение href для тега <base>.
-// При basePath="/talmor" → "/talmor/", при пустом → "/".
 func baseHref(basePath string) string {
 	if basePath == "" {
 		return "/"
@@ -16,165 +14,308 @@ templ Layout(title string, basePath string) {
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<title>{ title } — TalmorGo</title>
-			<!-- base href позволяет использовать относительные URL при любом basePath -->
 			<base href={ baseHref(basePath) }/>
+			<!-- Google Material Symbols -->
+			<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block"/>
 			<link rel="stylesheet" href="static/plyr.min.css"/>
 			<script src="static/htmx.min.js"></script>
 			<script src="static/plyr.min.js"></script>
 			<style>
 				*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+				/* ── Material 3 Color Tokens (Dark theme) ── */
 				:root {
-					--bg:       #1c1c1e;
-					--surface:  #2c2c2e;
-					--surface2: #3a3a3c;
-					--border:   #48484a;
-					--text:     #f2f2f7;
-					--muted:    #98989f;
-					--accent:   #636366;
+					--m3-bg:          #0f0f11;
+					--m3-surface:     #1a1a1f;
+					--m3-surface-var: #252530;
+					--m3-surface-hi:  #2e2e3a;
+					--m3-outline:     #49494f;
+					--m3-outline-var: #31313a;
+					--m3-primary:     #cac0ff;
+					--m3-on-primary:  #302063;
+					--m3-secondary:   #c8c3dc;
+					--m3-on-surface:  #e5e1f0;
+					--m3-on-surface-var: #c8c3d0;
+					--m3-error:       #ffb4ab;
+					--m3-on-error:    #690005;
+					--m3-scrim:       rgba(0,0,0,0.6);
+
+					/* status colors */
+					--c-pending:  #4a5568;
+					--c-running:  #276749;
+					--c-retrying: #7a5c1a;
+					--c-done:     #1a4731;
+					--c-failed:   #7a1f1f;
+					--c-lost:     #5c3d1a;
+					--c-deleted:  #3a3a3a;
 				}
-				html, body { height: 100%; }
-				body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+
+				html, body { height: 100%; background: var(--m3-bg); color: var(--m3-on-surface); }
+				body { font-family: 'Google Sans', system-ui, -apple-system, sans-serif; }
+
+				/* ── Material Symbols ── */
+				.m3-icon {
+					font-family: 'Material Symbols Rounded';
+					font-size: 20px;
+					font-weight: 400;
+					font-style: normal;
+					line-height: 1;
+					letter-spacing: normal;
+					text-transform: none;
+					display: inline-block;
+					white-space: nowrap;
+					word-wrap: normal;
+					direction: ltr;
+					font-feature-settings: 'liga';
+					-webkit-font-feature-settings: 'liga';
+					-webkit-font-smoothing: antialiased;
+					font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+					user-select: none;
+				}
 
 				/* ── Header ── */
 				header {
-					display: flex; align-items: center; gap: .6rem;
-					padding: .75rem 1rem; border-bottom: 1px solid var(--border);
-					position: sticky; top: 0; z-index: 10; background: var(--bg);
+					display: flex; align-items: center; gap: .75rem;
+					padding: .875rem 1.25rem;
+					border-bottom: 1px solid var(--m3-outline-var);
+					background: var(--m3-surface);
+					position: sticky; top: 0; z-index: 20;
 				}
-				header .logo { font-size: 1.25rem; font-weight: 600; }
+				.logo { font-size: 1.1rem; font-weight: 600; color: var(--m3-primary); }
 
-				/* ── Tabs ── */
-				.tabs {
-					display: flex; gap: 2px; padding: .5rem 1rem;
-					border-bottom: 1px solid var(--border); background: var(--bg);
-					position: sticky; top: 49px; z-index: 9;
+				/* ── Content ── */
+				#content { padding: 1rem 1.25rem; max-width: 1100px; margin: 0 auto; }
+
+				/* ── Add form ── */
+				.add-form {
+					display: flex; gap: .75rem; margin-bottom: 1rem;
+					background: var(--m3-surface); border-radius: 16px;
+					padding: .75rem 1rem;
+					border: 1px solid var(--m3-outline-var);
 				}
-				.tab-btn {
-					background: transparent; border: none; color: var(--muted);
-					padding: .45rem .85rem; border-radius: .5rem; cursor: pointer;
-					font-size: .875rem; font-weight: 500; transition: background .15s, color .15s;
-					display: flex; align-items: center; gap: .35rem;
-					min-height: 36px;
-				}
-				.tab-btn:hover { background: var(--surface); color: var(--text); }
-				.tab-btn.active { background: var(--surface2); color: var(--text); }
-
-				/* ── Content area ── */
-				#content { padding: 1rem; max-width: 900px; margin: 0 auto; }
-
-				/* ── Form ── */
-				.add-form { display: flex; gap: .5rem; margin-bottom: 1rem; }
 				.add-form input {
-					flex: 1; background: var(--surface); border: 1px solid var(--border);
-					border-radius: .5rem; padding: .55rem .75rem; color: var(--text);
-					font-size: .9rem; outline: none; min-width: 0;
+					flex: 1; background: transparent; border: none;
+					color: var(--m3-on-surface); font-size: .9375rem;
+					outline: none; min-width: 0;
 				}
-				.add-form input:focus { border-color: var(--accent); }
+				.add-form input::placeholder { color: var(--m3-on-surface-var); }
 
-				/* ── Buttons ── */
-				button, .btn {
-					background: var(--surface2); color: var(--text); border: none;
-					border-radius: .5rem; padding: .5rem .9rem; cursor: pointer;
-					font-size: .85rem; white-space: nowrap; transition: background .15s;
-					min-height: 36px;
+				/* ── M3 Filled Button ── */
+				.m3-btn {
+					display: inline-flex; align-items: center; gap: .5rem;
+					border: none; border-radius: 9999px; cursor: pointer;
+					font-size: .875rem; font-weight: 500; padding: .5rem 1.25rem;
+					transition: box-shadow .2s, filter .15s; min-height: 40px;
+					white-space: nowrap;
 				}
-				button:hover, .btn:hover { background: var(--accent); }
-				button.primary { background: #3a3a3c; }
-				button.primary:hover { background: #48484a; }
-				button.danger { background: #4c1c1c; color: #ff6b6b; }
-				button.danger:hover { background: #6b2020; }
-				button.ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
-				button.ghost:hover { background: var(--surface); color: var(--text); }
-				button.secondary { background: var(--surface); color: var(--muted); }
-				button.secondary:hover { background: var(--surface2); color: var(--text); }
+				.m3-btn-filled {
+					background: var(--m3-primary); color: var(--m3-on-primary);
+				}
+				.m3-btn-filled:hover { filter: brightness(1.08); }
 
-				/* ── Search ── */
-				.search-row { margin-bottom: .75rem; }
-				.search-row input {
-					width: 100%; background: var(--surface); border: 1px solid var(--border);
-					border-radius: .5rem; padding: .5rem .75rem; color: var(--text);
-					font-size: .875rem; outline: none;
+				/* ── Filter bar ── */
+				.filter-bar {
+					display: flex; flex-wrap: wrap; gap: .5rem;
+					align-items: center; margin-bottom: .75rem;
 				}
-				.search-row input:focus { border-color: var(--accent); }
+				.m3-search {
+					flex: 1; min-width: 180px;
+					background: var(--m3-surface-var); border: 1px solid var(--m3-outline-var);
+					border-radius: 9999px; color: var(--m3-on-surface);
+					font-size: .875rem; padding: .45rem 1rem; outline: none;
+				}
+				.m3-search:focus { border-color: var(--m3-primary); }
+				.tag-filter-row { display: flex; flex-wrap: wrap; gap: .35rem; }
 
-				/* ── Table ── */
-				table { width: 100%; border-collapse: collapse; font-size: .875rem; }
-				th {
-					text-align: left; color: var(--muted); font-weight: 500;
-					padding: .4rem .5rem; border-bottom: 1px solid var(--border);
-					font-size: .8rem; text-transform: uppercase; letter-spacing: .04em;
+				/* ── M3 Chips ── */
+				.m3-chip {
+					display: inline-flex; align-items: center; gap: .3rem;
+					background: transparent; border: 1px solid var(--m3-outline);
+					border-radius: 9999px; color: var(--m3-on-surface-var);
+					font-size: .8rem; padding: .2rem .75rem;
+					cursor: pointer; transition: background .15s, color .15s;
+					white-space: nowrap;
 				}
-				td { padding: .55rem .5rem; border-bottom: 1px solid var(--surface); vertical-align: middle; }
-				tr:last-child td { border-bottom: none; }
-				tr:hover td { background: var(--surface); }
+				.m3-chip:hover { background: var(--m3-surface-var); color: var(--m3-on-surface); }
+				.m3-chip.active {
+					background: var(--m3-primary); color: var(--m3-on-primary);
+					border-color: transparent;
+				}
+				.m3-chip-sm { font-size: .75rem; padding: .15rem .5rem; }
+				.m3-chip-add {
+					border-style: dashed; opacity: .6; padding: .15rem .5rem;
+				}
+				.m3-chip-add:hover { opacity: 1; }
+				.chip-remove {
+					background: transparent; border: none; cursor: pointer;
+					color: inherit; font-size: .7rem; padding: 0; line-height: 1;
+					opacity: .6; margin-left: .1rem;
+				}
+				.chip-remove:hover { opacity: 1; }
 
-				/* ── Badges ── */
-				.badge {
-					display: inline-flex; align-items: center; gap: .25rem;
-					font-size: .72rem; padding: .15rem .5rem;
-					border-radius: 9999px; font-weight: 500; white-space: nowrap;
+				/* ── M3 Badge ── */
+				.m3-badge {
+					display: inline-flex; align-items: center;
+					font-size: .7rem; font-weight: 500; padding: .15rem .5rem;
+					border-radius: 9999px; white-space: nowrap;
 				}
-				.badge-pending  { background: #1c2d42; color: #7eb8f7; }
-				.badge-running  { background: #122d1e; color: #5ecc8a; }
-				.badge-retrying { background: #2d1a0a; color: #f5a05a; }
-				.badge-done     { background: #0e2312; color: #7bcf95; }
-				.badge-failed   { background: #2d0f0f; color: #f77; }
+				.badge-pending  { background: var(--c-pending);  color: #a0aec0; }
+				.badge-running  { background: var(--c-running);  color: #68d391; }
+				.badge-retrying { background: var(--c-retrying); color: #f6ad55; }
+				.badge-done     { background: var(--c-done);     color: #68d391; }
+				.badge-failed   { background: var(--c-failed);   color: #fc8181; }
+				.badge-lost     { background: var(--c-lost);     color: #f6ad55; }
+				.badge-deleted  { background: var(--c-deleted);  color: #718096; }
 
-				/* ── Actions ── */
-				.actions { display: flex; gap: .3rem; align-items: center; }
-				.name-cell { font-size: .875rem; }
-				.url-cell {
-					max-width: 220px; overflow: hidden; text-overflow: ellipsis;
-					white-space: nowrap; color: var(--muted); font-size: .8rem;
+				/* ── Media list ── */
+				.media-list {
+					display: flex; flex-direction: column; gap: .35rem;
 				}
-				.size-cell { white-space: nowrap; color: var(--muted); font-size: .8rem; }
+				.media-row {
+					display: grid;
+					grid-template-columns: 80px 1fr auto;
+					gap: .75rem; align-items: center;
+					background: var(--m3-surface);
+					border: 1px solid var(--m3-outline-var);
+					border-radius: 12px;
+					padding: .75rem 1rem;
+					transition: background .15s;
+				}
+				.media-row:hover { background: var(--m3-surface-var); }
+				.media-row.status-running  { border-left: 3px solid #68d391; }
+				.media-row.status-retrying { border-left: 3px solid #f6ad55; }
+				.media-row.status-failed   { border-left: 3px solid #fc8181; }
+				.media-row.status-lost     { border-left: 3px solid #f6ad55; opacity: .8; }
+
+				/* Source column */
+				.media-source {
+					display: flex; flex-direction: column;
+					align-items: center; gap: .3rem;
+					color: var(--m3-on-surface-var); font-size: .7rem;
+					text-align: center;
+				}
+				.favicon { border-radius: 3px; }
+				.domain-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 72px; }
+
+				/* Info column */
+				.media-info { min-width: 0; }
+				.media-title {
+					font-size: .9rem; font-weight: 500; color: var(--m3-on-surface);
+					overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+					margin-bottom: .3rem;
+				}
+				.media-meta {
+					display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
+				}
+				.meta-size { font-size: .75rem; color: var(--m3-on-surface-var); }
+				.meta-retry { font-size: .72rem; color: #f6ad55; }
+				.tag-chips { display: flex; flex-wrap: wrap; gap: .25rem; align-items: center; }
+
+				/* Actions column */
+				.media-actions {
+					display: flex; gap: .2rem; align-items: center; flex-shrink: 0;
+				}
+
+				/* ── M3 Icon Button ── */
+				.m3-icon-btn {
+					display: inline-flex; align-items: center; justify-content: center;
+					width: 36px; height: 36px;
+					background: transparent; border: none;
+					border-radius: 9999px; cursor: pointer;
+					color: var(--m3-on-surface-var);
+					transition: background .15s, color .15s;
+					text-decoration: none; flex-shrink: 0;
+					position: relative; overflow: hidden;
+				}
+				.m3-icon-btn:hover {
+					background: rgba(202,192,255,.1);
+					color: var(--m3-on-surface);
+				}
+				.m3-icon-btn.m3-icon-btn-danger { color: var(--m3-error); }
+				.m3-icon-btn.m3-icon-btn-danger:hover { background: rgba(255,180,171,.1); }
+
+				/* State layer ripple */
+				.m3-icon-btn::after {
+					content: ''; position: absolute; inset: 0;
+					border-radius: inherit; pointer-events: none;
+					background: currentColor; opacity: 0;
+					transition: opacity .1s;
+				}
+				.m3-icon-btn:active::after { opacity: .12; }
 
 				/* ── Empty state ── */
-				.empty { color: var(--muted); text-align: center; padding: 2.5rem 1rem; font-size: .9rem; }
-
-				/* ── Player dialog (popup) ── */
-				dialog#player-dialog {
-					background: #000; border: none; border-radius: .75rem;
-					padding: 0; width: min(92vw, 860px); max-height: 92vh;
-					overflow: hidden; margin: auto;
+				.m3-empty {
+					display: flex; flex-direction: column; align-items: center;
+					gap: 1rem; padding: 4rem 1rem;
+					color: var(--m3-on-surface-var); text-align: center;
 				}
-				dialog#player-dialog::backdrop { background: rgba(0,0,0,.8); }
+
+				/* ── Player dialog ── */
+				dialog#player-dialog {
+					background: #000; border: none; border-radius: 16px;
+					padding: 0; width: min(94vw, 920px); max-height: 94vh;
+					overflow: hidden; margin: auto;
+					box-shadow: 0 8px 48px rgba(0,0,0,.6);
+				}
+				dialog#player-dialog::backdrop { background: var(--m3-scrim); }
 				.player-header {
 					display: flex; justify-content: space-between; align-items: center;
-					padding: .5rem .75rem; background: #111; color: var(--text);
+					padding: .6rem .875rem; background: #111;
+					color: var(--m3-on-surface);
 				}
-				.player-title { font-size: .875rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-				.player-close { background: transparent; border: none; color: var(--muted); font-size: 1.2rem; cursor: pointer; padding: .2rem .4rem; }
-				.player-close:hover { color: var(--text); background: transparent; }
+				.player-title {
+					font-size: .875rem; font-weight: 500;
+					overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+					flex: 1; margin-right: .5rem;
+				}
+				.player-close {
+					display: inline-flex; align-items: center; justify-content: center;
+					width: 32px; height: 32px; border-radius: 9999px;
+					background: transparent; border: none;
+					color: var(--m3-on-surface-var); cursor: pointer;
+					transition: background .15s;
+				}
+				.player-close:hover { background: rgba(255,255,255,.1); }
 
 				/* ── Mobile ── */
 				@media (max-width: 600px) {
-					header { padding: .6rem .75rem; }
-					.tabs { padding: .4rem .75rem; top: 45px; }
+					header { padding: .75rem; }
 					#content { padding: .75rem; }
-					.add-form { flex-wrap: wrap; }
-					.add-form input { min-width: 100%; }
-					th:nth-child(2), td:nth-child(2) { display: none; } /* скрываем размер */
-					.url-cell { max-width: 140px; }
-					button, .btn { padding: .45rem .7rem; }
+					.media-row {
+						grid-template-columns: 56px 1fr;
+						grid-template-rows: auto auto;
+					}
+					.media-actions {
+						grid-column: 1 / -1;
+						flex-wrap: wrap;
+					}
+					.m3-icon-btn { width: 32px; height: 32px; }
+					.m3-icon { font-size: 18px; }
 				}
 			</style>
 		</head>
 		<body>
 			<header>
-				<span>🎬</span>
+				<span class="m3-icon" style="color:var(--m3-primary);font-size:24px;font-variation-settings:'FILL' 1">movie</span>
 				<span class="logo">TalmorGo</span>
 			</header>
-			{ children... }
-			<!-- Plyr popup dialog -->
+			<main>
+				{ children... }
+			</main>
+
+			<!-- Plyr popup -->
 			<dialog id="player-dialog">
 				<div class="player-header">
 					<span class="player-title" id="player-title"></span>
-					<button class="player-close" onclick="closePlayer()">✕</button>
+					<button class="player-close" onclick="closePlayer()">
+						<span class="m3-icon">close</span>
+					</button>
 				</div>
 				<video id="plyr-video" playsinline></video>
 			</dialog>
+
 			<script>
+				// ── Plyr ──
 				var plyrInstance;
 				document.addEventListener('DOMContentLoaded', function() {
 					plyrInstance = new Plyr('#plyr-video', {
@@ -183,7 +324,7 @@ templ Layout(title string, basePath string) {
 					});
 				});
 				function openPlayer(src, title) {
-					document.getElementById('player-title').textContent = title;
+					document.getElementById('player-title').textContent = title || src;
 					plyrInstance.source = { type: 'video', sources: [{ src: src, type: 'video/mp4' }] };
 					document.getElementById('player-dialog').showModal();
 					plyrInstance.play();
@@ -195,13 +336,15 @@ templ Layout(title string, basePath string) {
 				document.getElementById('player-dialog').addEventListener('click', function(e) {
 					if (e.target === this) closePlayer();
 				});
+
+				// ── File ops ──
 				function renameFile(id, newName) {
 					fetch('files/' + id, {
 						method: 'PATCH',
 						headers: {'Content-Type': 'application/json'},
 						body: JSON.stringify({name: newName}),
 					}).then(function() {
-						htmx.ajax('GET', 'files/list', {target: '#files-inner', swap: 'outerHTML'});
+						htmx.ajax('GET', 'media/list', {target: '#media-inner', swap: 'outerHTML'});
 					});
 				}
 				function renamePrompt(id, name) {
@@ -213,11 +356,58 @@ templ Layout(title string, basePath string) {
 						.then(function(r) { return r.json(); })
 						.then(function(d) {
 							navigator.clipboard.writeText(d.url).then(function() {
-								btn.textContent = '✓';
-								setTimeout(function() { btn.textContent = '🔗'; }, 1500);
+								var icon = btn.querySelector('.m3-icon');
+								if (icon) { icon.textContent = 'check'; setTimeout(function() { icon.textContent = 'link'; }, 1500); }
 							});
 						});
 				}
+				function copyOriginalURL(url) {
+					navigator.clipboard.writeText(url);
+				}
+
+				// ── Tags ──
+				function addTag(jobID) {
+					var n = prompt('Новый тег:');
+					if (!n || !n.trim()) return;
+					fetch('jobs/' + jobID + '/tags', {
+						method: 'POST',
+						headers: {'Content-Type': 'application/json'},
+						body: JSON.stringify({name: n.trim()}),
+					}).then(function() {
+						htmx.ajax('GET', 'media/list', {target: '#media-inner', swap: 'outerHTML'});
+					});
+				}
+
+				// ── Client-side filtering ──
+				var _activeTag = null;
+				function toggleTagFilter(btn) {
+					var tag = btn.dataset.tag;
+					if (_activeTag === tag) {
+						_activeTag = null;
+						btn.classList.remove('active');
+					} else {
+						document.querySelectorAll('.tag-filter-row .m3-chip').forEach(function(b) { b.classList.remove('active'); });
+						_activeTag = tag;
+						btn.classList.add('active');
+					}
+					applyFilters();
+				}
+				function applyFilters() {
+					var q = (document.getElementById('media-search') || {value:''}).value.toLowerCase();
+					document.querySelectorAll('.media-row').forEach(function(row) {
+						var text = (row.dataset.title + ' ' + row.dataset.url + ' ' + row.dataset.domain).toLowerCase();
+						var tags = row.dataset.tags || '';
+						var matchSearch = !q || text.includes(q) || tags.toLowerCase().includes(q);
+						var matchTag = !_activeTag || tags.split(',').indexOf(_activeTag) >= 0;
+						row.style.display = (matchSearch && matchTag) ? '' : 'none';
+					});
+				}
+				// Переприменяем фильтр после HTMX-обновления
+				document.body.addEventListener('htmx:afterSwap', function(e) {
+					if (e.detail.target && e.detail.target.id === 'media-inner') {
+						applyFilters();
+					}
+				});
 			</script>
 		</body>
 	</html>

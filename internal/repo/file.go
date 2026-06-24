@@ -24,21 +24,19 @@ func (r *sqliteFileRepo) Create(ctx context.Context, f *model.File) error {
 	}
 	f.CreatedAt = time.Now().UTC()
 
-	// Upsert по path: если файл с таким путём уже есть (повторная загрузка),
-	// обновляем имя/размер и снимаем soft-delete пометку.
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO files (id, path, name, size, created_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			name       = excluded.name,
 			size       = excluded.size,
-			deleted_at = NULL
+			deleted_at = NULL,
+			lost_at    = NULL
 	`, f.ID, f.Path, f.Name, f.Size, f.CreatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}
 
-	// Получаем фактический ID (может быть старым при конфликте).
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, created_at FROM files WHERE path=?`, f.Path)
 	var id, createdAt string
@@ -52,30 +50,32 @@ func (r *sqliteFileRepo) Create(ctx context.Context, f *model.File) error {
 
 func (r *sqliteFileRepo) GetByID(ctx context.Context, id string) (*model.File, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, path, name, size, created_at, deleted_at FROM files WHERE id=?`, id)
+		`SELECT id, path, name, size, created_at, deleted_at, lost_at FROM files WHERE id=?`, id)
 	return scanFile(row)
 }
 
 func (r *sqliteFileRepo) List(ctx context.Context) ([]*model.File, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, path, name, size, created_at, deleted_at FROM files WHERE deleted_at IS NULL ORDER BY created_at DESC`)
+		`SELECT id, path, name, size, created_at, deleted_at, lost_at
+		 FROM files WHERE deleted_at IS NULL ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	var files []*model.File
-	for rows.Next() {
-		f, err := scanFile(rows)
-		if err != nil {
-			return nil, err
-		}
-		files = append(files, f)
-	}
-	return files, rows.Err()
+	return scanFiles(rows)
 }
 
-// ListDeleted возвращает удалённые файлы вместе с исходным URL из связанного задания.
+// ListAll возвращает все файлы (включая удалённые/потерянные) для проверки файловой системы.
+func (r *sqliteFileRepo) ListAll(ctx context.Context) ([]*model.File, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, path, name, size, created_at, deleted_at, lost_at FROM files ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanFiles(rows)
+}
+
 func (r *sqliteFileRepo) ListDeleted(ctx context.Context) ([]*model.DeletedFile, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT f.id, f.name, COALESCE(j.url,''), f.deleted_at
@@ -114,7 +114,6 @@ func (r *sqliteFileRepo) Rename(ctx context.Context, id, newName, newPath string
 	return nil
 }
 
-// Delete — мягкое удаление: проставляет deleted_at, запись остаётся в БД.
 func (r *sqliteFileRepo) Delete(ctx context.Context, id string) error {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE files SET deleted_at=? WHERE id=? AND deleted_at IS NULL`,
@@ -129,11 +128,36 @@ func (r *sqliteFileRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *sqliteFileRepo) MarkLost(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE files SET lost_at=? WHERE id=? AND lost_at IS NULL AND deleted_at IS NULL`,
+		time.Now().UTC().Format(time.RFC3339Nano), id)
+	return err
+}
+
+func (r *sqliteFileRepo) MarkFound(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE files SET lost_at=NULL WHERE id=?`, id)
+	return err
+}
+
+func scanFiles(rows *sql.Rows) ([]*model.File, error) {
+	var files []*model.File
+	for rows.Next() {
+		f, err := scanFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, f)
+	}
+	return files, rows.Err()
+}
+
 func scanFile(s scanner) (*model.File, error) {
 	var f model.File
 	var createdAt string
-	var deletedAt sql.NullString
-	err := s.Scan(&f.ID, &f.Path, &f.Name, &f.Size, &createdAt, &deletedAt)
+	var deletedAt, lostAt sql.NullString
+	err := s.Scan(&f.ID, &f.Path, &f.Name, &f.Size, &createdAt, &deletedAt, &lostAt)
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +165,10 @@ func scanFile(s scanner) (*model.File, error) {
 	if deletedAt.Valid && deletedAt.String != "" {
 		t, _ := time.Parse(time.RFC3339Nano, deletedAt.String)
 		f.DeletedAt = &t
+	}
+	if lostAt.Valid && lostAt.String != "" {
+		t, _ := time.Parse(time.RFC3339Nano, lostAt.String)
+		f.LostAt = &t
 	}
 	return &f, nil
 }
