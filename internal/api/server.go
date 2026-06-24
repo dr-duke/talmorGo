@@ -81,6 +81,10 @@ func New(
 	// Если задан basePath, оборачиваем: внешний mux снимает префикс и отдаёт внутреннему.
 	if basePath != "" {
 		outer := http.NewServeMux()
+		// Health endpoint регистрируем на внешнем mux — k8s liveness probe ходит без префикса.
+		if cfg.HealthEndpoint != "" {
+			outer.HandleFunc("GET "+cfg.HealthEndpoint, handler.Health)
+		}
 		// Редирект /talmor → /talmor/
 		outer.HandleFunc("GET "+basePath, func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, basePath+"/", http.StatusMovedPermanently)
