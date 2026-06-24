@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os/exec"
 	"path/filepath"
@@ -28,19 +27,21 @@ type Options struct {
 	OutputFormat string
 	Proxy        string
 	Timeout      time.Duration
+	MaxFiles     int // передаётся в --playlist-items "1:N"; 0 — без лимита
 	ExtraArgs    []string
 }
 
 // Run запускает yt-dlp для указанного URL и возвращает канал событий.
-// Канал закрывается после полного завершения процесса (cmd.Wait() вернулся),
-// что гарантирует, что файлы на диске уже записаны.
+// Событие отправляется сразу после завершения обработки каждого файла —
+// не нужно ждать завершения всего процесса (важно для плейлистов).
+// Канал закрывается после завершения процесса и отправки финального статуса.
 func Run(ctx context.Context, url string, opts Options) <-chan Event {
-	ch := make(chan Event, 4)
+	ch := make(chan Event, 8)
 	go func() {
 		defer close(ch)
 
 		args := buildArgs(url, opts)
-		slog.Info("downloader: start", "binary", opts.Binary, "url", url)
+		slog.Info("downloader: start", "binary", opts.Binary, "url", url, "args", args)
 
 		deadline := opts.Timeout
 		if deadline <= 0 {
@@ -70,56 +71,59 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 		filePattern := buildFilePattern(opts.OutputDir)
 
 		var (
-			mu         sync.Mutex
-			foundPaths []string
-			errLines   []string // последние строки stderr для диагностики
-			wg         sync.WaitGroup
+			mu        sync.Mutex
+			fileCount int
+			errLines  []string
+			wg        sync.WaitGroup
 		)
 
-		scanReader := func(r io.Reader, isStdout bool) {
+		wg.Add(2)
+
+		// stdout содержит только --print-вывод (пути к готовым файлам).
+		// Отправляем событие немедленно — не ждём завершения всего процесса.
+		go func() {
 			defer wg.Done()
-			s := bufio.NewScanner(r)
+			s := bufio.NewScanner(stdout)
 			for s.Scan() {
 				text := s.Text()
-				if isStdout {
-					if filePattern.MatchString(text) {
-						mu.Lock()
-						foundPaths = append(foundPaths, text)
-						mu.Unlock()
-					} else {
-						slog.Debug("yt-dlp stdout", "line", text)
-					}
-				} else {
-					// stderr логируем видимо, чтобы ошибки не терялись
-					slog.Info("yt-dlp stderr", "line", text)
+				if filePattern.MatchString(text) {
 					mu.Lock()
-					errLines = append(errLines, text)
-					// держим только последние 10 строк
-					if len(errLines) > 10 {
-						errLines = errLines[len(errLines)-10:]
-					}
+					fileCount++
 					mu.Unlock()
+					ch <- Event{FileName: filepath.Base(text), Path: text}
+				} else {
+					slog.Debug("yt-dlp stdout", "line", text)
 				}
 			}
-		}
+		}()
 
-		wg.Add(2)
-		go scanReader(stdout, true)
-		go scanReader(stderr, false)
+		// stderr: логируем, сохраняем последние строки для диагностики.
+		go func() {
+			defer wg.Done()
+			s := bufio.NewScanner(stderr)
+			for s.Scan() {
+				text := s.Text()
+				slog.Info("yt-dlp stderr", "line", text)
+				mu.Lock()
+				errLines = append(errLines, text)
+				if len(errLines) > 10 {
+					errLines = errLines[len(errLines)-10:]
+				}
+				mu.Unlock()
+			}
+		}()
 
 		wg.Wait()
 		cmdErr := cmd.Wait()
 
-		// Процесс завершён и все файлы закрыты — отправляем события.
-		for _, path := range foundPaths {
-			ch <- Event{FileName: filepath.Base(path), Path: path}
-		}
+		mu.Lock()
+		count := fileCount
+		errMsg := lastErrorLine(errLines)
+		mu.Unlock()
 
-		if cmdErr != nil && ctx.Err() == nil && len(foundPaths) == 0 {
-			// Берём последнюю строку ошибки из stderr для понятного сообщения.
-			mu.Lock()
-			errMsg := lastErrorLine(errLines)
-			mu.Unlock()
+		// Сигнализируем ошибку только если не скачали ни одного файла.
+		// При частичном успехе (--no-abort-on-error) файлы уже отправлены выше.
+		if cmdErr != nil && ctx.Err() == nil && count == 0 {
 			if errMsg == "" {
 				errMsg = cmdErr.Error()
 			}
@@ -147,8 +151,16 @@ func buildArgs(url string, opts Options) []string {
 		"-o", "%(title)s.%(ext)s",
 		"--print", "post_process:filename",
 		"--no-simulate",
+		// Выбираем лучший видео+аудио; фолбек на best combined если раздельных треков нет.
+		"-f", "bv*+ba/b",
 		"--merge-output-format", opts.OutputFormat,
 		"-P", opts.OutputDir,
+		// Не прерывать весь job при ошибке одного видео в плейлисте.
+		"--no-abort-on-error",
+	}
+	if opts.MaxFiles > 0 {
+		// Ограничиваем на стороне yt-dlp, а не только в Go — экономит трафик.
+		args = append(args, "--playlist-items", fmt.Sprintf("1:%d", opts.MaxFiles))
 	}
 	if opts.Proxy != "" {
 		args = append(args, "--proxy", opts.Proxy)

@@ -131,23 +131,18 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		OutputFormat: p.cfg.YtDlpOutputFormat,
 		Proxy:        p.cfg.YtDlpProxy,
 		Timeout:      time.Duration(p.cfg.YtDlpTimeout) * time.Second,
+		MaxFiles:     p.cfg.YtDlpMaxFilesPerRequest,
 		ExtraArgs:    p.cfg.ExtraArgsList(),
 	}
 
 	var firstFile *model.File
 	var lastErr error
 	fileCount := 0
-	maxFiles := p.cfg.YtDlpMaxFilesPerRequest
 
 	for event := range downloader.Run(ctx, job.URL, opts) {
 		if event.Err != nil {
 			lastErr = event.Err
 			slog.Error("worker: download event error", "job", job.ID, "err", event.Err)
-			continue
-		}
-
-		if maxFiles > 0 && fileCount >= maxFiles {
-			slog.Warn("worker: max files per request reached, skipping", "job", job.ID, "limit", maxFiles)
 			continue
 		}
 
