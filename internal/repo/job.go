@@ -158,7 +158,7 @@ func (r *sqliteJobRepo) LastMedia(ctx context.Context, n int) ([]*model.MediaIte
 	q := mediaRowSQL + `
 		FROM files f
 		JOIN jobs j ON j.id = f.job_id
-		WHERE j.status = 'done' AND f.deleted_at IS NULL AND f.lost_at IS NULL
+		WHERE j.status IN ('done','imported') AND f.deleted_at IS NULL AND f.lost_at IS NULL
 		ORDER BY sort_ts DESC
 		LIMIT ?
 	`
