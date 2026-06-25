@@ -46,6 +46,9 @@ type Config struct {
 
 	// Максимум файлов на один запрос (плейлист/канал)
 	YtDlpMaxFilesPerRequest int `long:"ytdlp-max-files" env:"YT_DLP_MAX_FILES_PER_REQUEST" default:"100"`
+
+	// Сканирование директории скачивания (секунды между сканами, 0 — выключено)
+	DirScanInterval int `long:"dir-scan-interval" env:"DIR_SCAN_INTERVAL" default:"0"`
 }
 
 // LinkBase возвращает корень для построения публичных ссылок: BASE_URL + BASE_PATH.

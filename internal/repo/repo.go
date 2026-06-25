@@ -22,6 +22,12 @@ type JobRepo interface {
 	LastMedia(ctx context.Context, n int) ([]*model.MediaItem, error)
 	ClaimNext(ctx context.Context) (*model.Job, error)
 	Update(ctx context.Context, job *model.Job) error
+	// Cancel переводит pending/retrying задание в статус cancelled (мягкая отмена).
+	Cancel(ctx context.Context, id string) error
+	// ConfirmSingle переводит checking-задание в pending (URL оказался одиночным видео).
+	ConfirmSingle(ctx context.Context, id string) error
+	// DeleteChecking удаляет checking-задание (URL оказался плейлистом, создаём отдельные jobs).
+	DeleteChecking(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 	ResetFailed(ctx context.Context, id string) error
 	ResetStale(ctx context.Context) error
@@ -41,7 +47,11 @@ type FileRepo interface {
 	List(ctx context.Context) ([]*model.File, error)
 	ListAll(ctx context.Context) ([]*model.File, error) // включая удалённые/потерянные
 	ListByJobID(ctx context.Context, jobID string) ([]*model.File, error)
+	// DeleteAllByJobID полностью удаляет все файлы задания из БД (используется при redownload).
+	DeleteAllByJobID(ctx context.Context, jobID string) error
 	ListDeleted(ctx context.Context) ([]*model.DeletedFile, error)
+	// AllPaths возвращает множество всех известных путей (включая удалённые) для сверки при сканировании.
+	AllPaths(ctx context.Context) (map[string]struct{}, error)
 	Rename(ctx context.Context, id, newName, newPath string) error
 	Delete(ctx context.Context, id string) error
 	MarkLost(ctx context.Context, id string) error

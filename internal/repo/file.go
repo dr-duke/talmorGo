@@ -89,6 +89,32 @@ func (r *sqliteFileRepo) ListByJobID(ctx context.Context, jobID string) ([]*mode
 	return scanFiles(rows)
 }
 
+// DeleteAllByJobID физически удаляет все файлы задания из БД (при redownload).
+// Presigned-токены удаляются каскадно.
+func (r *sqliteFileRepo) DeleteAllByJobID(ctx context.Context, jobID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM files WHERE job_id=?`, jobID)
+	return err
+}
+
+// AllPaths возвращает множество всех известных путей (включая удалённые)
+// для быстрой проверки при сканировании директории.
+func (r *sqliteFileRepo) AllPaths(ctx context.Context) (map[string]struct{}, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT path FROM files`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	paths := make(map[string]struct{})
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		paths[p] = struct{}{}
+	}
+	return paths, rows.Err()
+}
+
 func (r *sqliteFileRepo) ListDeleted(ctx context.Context) ([]*model.DeletedFile, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT f.id, f.name, COALESCE(j.url,''), f.deleted_at

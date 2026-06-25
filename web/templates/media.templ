@@ -172,7 +172,7 @@ templ mediaRow(item *model.MediaItem) {
 					title="Переименовать"
 				><span class="m3-icon">edit</span></button>
 			}
-			if item.Job.Status == model.JobDone || item.EffectiveStatus() == "lost" || item.Job.Status == model.JobFailed {
+			if item.Job.Status == model.JobDone || item.EffectiveStatus() == "missing" || item.Job.Status == model.JobFailed || item.Job.Status == model.JobCancelled {
 				<button
 					class="m3-icon-btn"
 					hx-post={ fmt.Sprintf("jobs/%s/redownload", item.Job.ID) }
@@ -182,11 +182,12 @@ templ mediaRow(item *model.MediaItem) {
 					title="Скачать повторно"
 				><span class="m3-icon">refresh</span></button>
 			}
-			if item.Job.Status == model.JobPending {
+			if item.Job.Status == model.JobPending || item.Job.Status == model.JobRunning || item.Job.Status == model.JobRetrying {
 				<button
 					class="m3-icon-btn m3-icon-btn-danger"
 					hx-delete={ fmt.Sprintf("queue/%s", item.Job.ID) }
-					hx-swap="none"
+					hx-target="#media-inner"
+					hx-swap="outerHTML"
 					hx-confirm="Отменить задачу?"
 					title="Отменить"
 				><span class="m3-icon">cancel</span></button>
@@ -233,6 +234,8 @@ func shortDomain(d string) string {
 
 func statusLabel(s string) string {
 	switch s {
+	case "checking":
+		return "проверка…"
 	case "pending":
 		return "ожидание"
 	case "running":
@@ -243,10 +246,12 @@ func statusLabel(s string) string {
 		return "готово"
 	case "failed":
 		return "ошибка"
-	case "lost":
-		return "файл пропал"
+	case "missing":
+		return "файл отсутствует"
 	case "deleted":
 		return "удалён"
+	case "cancelled":
+		return "отменено"
 	default:
 		return s
 	}

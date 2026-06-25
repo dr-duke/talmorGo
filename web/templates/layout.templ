@@ -41,13 +41,15 @@ templ Layout(title string, basePath string) {
 					--m3-scrim:       rgba(0,0,0,0.6);
 
 					/* status colors */
-					--c-pending:  #4a5568;
-					--c-running:  #276749;
-					--c-retrying: #7a5c1a;
-					--c-done:     #1a4731;
-					--c-failed:   #7a1f1f;
-					--c-lost:     #5c3d1a;
-					--c-deleted:  #3a3a3a;
+					--c-checking:  #2a3a5a;
+					--c-pending:   #4a5568;
+					--c-running:   #276749;
+					--c-retrying:  #7a5c1a;
+					--c-done:      #1a4731;
+					--c-failed:    #7a1f1f;
+					--c-missing:   #5c3d1a;
+					--c-deleted:   #3a3a3a;
+					--c-cancelled: #4a3a4a;
 				}
 
 				html, body { height: 100%; background: var(--m3-bg); color: var(--m3-on-surface); }
@@ -159,13 +161,15 @@ templ Layout(title string, basePath string) {
 					font-size: .7rem; font-weight: 500; padding: .15rem .5rem;
 					border-radius: 9999px; white-space: nowrap;
 				}
+				.badge-checking { background: var(--c-checking); color: #90aad0; }
 				.badge-pending  { background: var(--c-pending);  color: #a0aec0; }
 				.badge-running  { background: var(--c-running);  color: #68d391; }
 				.badge-retrying { background: var(--c-retrying); color: #f6ad55; }
 				.badge-done     { background: var(--c-done);     color: #68d391; }
 				.badge-failed   { background: var(--c-failed);   color: #fc8181; }
-				.badge-lost     { background: var(--c-lost);     color: #f6ad55; }
-				.badge-deleted  { background: var(--c-deleted);  color: #718096; }
+				.badge-missing   { background: var(--c-missing);   color: #f6ad55; }
+				.badge-deleted   { background: var(--c-deleted);   color: #718096; }
+				.badge-cancelled { background: var(--c-cancelled); color: #c9a8e0; }
 
 				/* ── Media list ── */
 				.media-list {
@@ -281,7 +285,7 @@ templ Layout(title string, basePath string) {
 				dialog#log-dialog {
 					background: var(--m3-surface); border: 1px solid var(--m3-outline-var);
 					border-radius: 16px; padding: 0;
-					width: min(96vw, 860px); max-height: 86vh;
+					width: min(96vw, 860px); min-height: 60vh; max-height: 86vh;
 					overflow: hidden; margin: auto;
 					box-shadow: 0 8px 48px rgba(0,0,0,.6);
 				}

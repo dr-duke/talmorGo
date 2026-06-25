@@ -126,12 +126,16 @@ func (h *MediaHandler) Redownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "job not found", http.StatusNotFound)
 		return
 	}
-	// Удаляем все файлы этого задания (в т.ч. файлы плейлиста).
+	// Удаляем физические файлы с диска.
 	if files, err := h.Files.ListByJobID(r.Context(), jobID); err == nil {
 		for _, f := range files {
-			os.Remove(f.Path)                 //nolint:errcheck
-			h.Files.Delete(r.Context(), f.ID) //nolint:errcheck
+			os.Remove(f.Path) //nolint:errcheck
 		}
+	}
+	// Hard delete записей файлов из БД (включая presigned-токены каскадом).
+	// Soft delete не используем: иначе ListMedia видит "deleted" запись и не показывает job как pending.
+	if err := h.Files.DeleteAllByJobID(r.Context(), jobID); err != nil {
+		slog.Warn("media: delete files for redownload", "job_id", jobID, "err", err)
 	}
 	if err := h.Jobs.Redownload(r.Context(), jobID); err != nil {
 		slog.Error("media: redownload", "err", err)

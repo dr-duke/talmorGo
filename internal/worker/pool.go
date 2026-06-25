@@ -3,8 +3,12 @@ package worker
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/dr-duke/talmorGo/internal/config"
@@ -49,17 +53,51 @@ type Pool struct {
 	tokenRepo repo.TokenRepo
 	notifier  Notifier
 	notify    chan struct{}
+
+	mu          sync.Mutex
+	cancelFuncs map[string]context.CancelFunc // jobID → cancel активной закачки
 }
 
 func NewPool(cfg *config.Config, jobRepo repo.JobRepo, fileRepo repo.FileRepo, tokenRepo repo.TokenRepo, notifier Notifier) *Pool {
 	return &Pool{
-		cfg:       cfg,
-		jobRepo:   jobRepo,
-		fileRepo:  fileRepo,
-		tokenRepo: tokenRepo,
-		notifier:  notifier,
-		notify:    make(chan struct{}, cfg.WorkerCount),
+		cfg:         cfg,
+		jobRepo:     jobRepo,
+		fileRepo:    fileRepo,
+		tokenRepo:   tokenRepo,
+		notifier:    notifier,
+		notify:      make(chan struct{}, cfg.WorkerCount),
+		cancelFuncs: make(map[string]context.CancelFunc),
 	}
+}
+
+// CancelJob прерывает активно скачиваемый job. Возвращает true если job был running.
+func (p *Pool) CancelJob(jobID string) bool {
+	p.mu.Lock()
+	fn, ok := p.cancelFuncs[jobID]
+	if ok {
+		delete(p.cancelFuncs, jobID)
+	}
+	p.mu.Unlock()
+	if ok {
+		fn()
+	}
+	return ok
+}
+
+// cleanPartialFiles удаляет незавершённые фрагменты yt-dlp (.part, .ytdl) из директории.
+func cleanPartialFiles(dir string) {
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error { //nolint:errcheck
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if strings.HasSuffix(name, ".part") || strings.HasSuffix(name, ".ytdl") {
+			if rmErr := os.Remove(path); rmErr != nil {
+				slog.Warn("worker: remove partial file", "path", path, "err", rmErr)
+			}
+		}
+		return nil
+	})
 }
 
 func (p *Pool) SetNotifier(n Notifier) { p.notifier = n }
@@ -113,6 +151,18 @@ func (p *Pool) tgJob(job *model.Job) bool {
 }
 
 func (p *Pool) process(ctx context.Context, job *model.Job) {
+	// Per-job контекст: CancelJob() вызывает cancel() и убивает yt-dlp процесс.
+	jobCtx, cancel := context.WithCancel(ctx)
+	p.mu.Lock()
+	p.cancelFuncs[job.ID] = cancel
+	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		delete(p.cancelFuncs, job.ID)
+		p.mu.Unlock()
+		cancel()
+	}()
+
 	slog.Info("worker: processing job", "id", job.ID, "url", job.URL, "attempt", job.RetryCount+1)
 
 	if p.tgJob(job) {
@@ -139,7 +189,7 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 	var lastErr error
 	fileCount := 0
 
-	for event := range downloader.Run(ctx, job.URL, opts) {
+	for event := range downloader.Run(jobCtx, job.URL, opts) {
 		if event.Log != "" {
 			if err := p.jobRepo.SaveLog(ctx, job.ID, event.Log); err != nil {
 				slog.Warn("worker: save log", "job", job.ID, "err", err)
@@ -186,6 +236,17 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 				})
 			}
 		}
+	}
+
+	// Если контекст отменён — пользователь нажал «Отменить».
+	if jobCtx.Err() != nil {
+		job.Status = model.JobCancelled
+		if err := p.jobRepo.Update(ctx, job); err != nil {
+			slog.Error("worker: update job cancelled", "err", err)
+		}
+		cleanPartialFiles(p.cfg.YtDlpOutputDir)
+		slog.Info("worker: job cancelled", "id", job.ID)
+		return
 	}
 
 	if lastErr != nil && firstFile == nil {

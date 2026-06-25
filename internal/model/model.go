@@ -8,11 +8,13 @@ import (
 type JobStatus string
 
 const (
-	JobPending  JobStatus = "pending"
-	JobRunning  JobStatus = "running"
-	JobRetrying JobStatus = "retrying"
-	JobDone     JobStatus = "done"
-	JobFailed   JobStatus = "failed"
+	JobChecking  JobStatus = "checking"  // временный: yt-dlp проверяет не плейлист ли URL
+	JobPending   JobStatus = "pending"
+	JobRunning   JobStatus = "running"
+	JobRetrying  JobStatus = "retrying"
+	JobDone      JobStatus = "done"
+	JobFailed    JobStatus = "failed"
+	JobCancelled JobStatus = "cancelled"
 )
 
 type Job struct {
@@ -73,11 +75,13 @@ type MediaItem struct {
 }
 
 // EffectiveStatus возвращает статус с учётом состояния файла.
+// "deleted" возвращаем только когда job завершён; при pending/running показываем реальный
+// статус job'а, чтобы redownload не маскировался мягко-удалённым файлом.
 func (m *MediaItem) EffectiveStatus() string {
 	if m.File != nil && m.File.LostAt != nil {
-		return "lost"
+		return "missing"
 	}
-	if m.File != nil && m.File.DeletedAt != nil {
+	if m.File != nil && m.File.DeletedAt != nil && m.Job.Status == JobDone {
 		return "deleted"
 	}
 	return string(m.Job.Status)

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 
 type Enqueuer interface {
 	Enqueue()
+	// CancelJob прерывает активно скачиваемый job. Возвращает true если job был running.
+	CancelJob(jobID string) bool
 }
 
 type QueueHandler struct {
@@ -24,8 +27,8 @@ type QueueHandler struct {
 	Cfg  *config.Config
 }
 
-// Add добавляет URL(ы) в очередь. Если URL — плейлист, разворачивает его
-// в отдельные job'ы через yt-dlp --flat-playlist и автоматически назначает тег.
+// Add добавляет URL в очередь немедленно, не блокируя ответ.
+// Если URL — плейлист, разворачивание в отдельные job'ы происходит асинхронно.
 func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 	rawURL := ""
 	ct := r.Header.Get("Content-Type")
@@ -52,34 +55,60 @@ func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Создаём placeholder в статусе "checking" — воркер игнорирует этот статус.
+	// Ответ отдаём немедленно; горутина проверяет плейлист и затем переводит
+	// placeholder в pending (одиночное видео) или удаляет + создаёт отдельные jobs (плейлист).
+	job := &model.Job{URL: rawURL, Status: model.JobChecking, Source: "web"}
+	if err := h.Jobs.Create(r.Context(), job); err != nil {
+		slog.Error("queue add", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("HX-Trigger", "mediaRefresh")
+	w.WriteHeader(http.StatusNoContent)
+
 	opts := downloader.Options{
 		Binary:   h.Cfg.YtDlpBinary,
 		Proxy:    h.Cfg.YtDlpProxy,
 		MaxFiles: h.Cfg.YtDlpMaxFilesPerRequest,
 		Timeout:  time.Duration(h.Cfg.YtDlpTimeout) * time.Second,
 	}
-
-	if info := downloader.FetchPlaylist(r.Context(), rawURL, opts); info != nil {
-		h.createPlaylistJobs(r, info, "web", 0)
-	} else {
-		job := &model.Job{URL: rawURL, Status: model.JobPending, Source: "web"}
-		if err := h.Jobs.Create(r.Context(), job); err != nil {
-			slog.Error("queue add", "err", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	h.Pool.Enqueue()
-	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusNoContent)
+	go h.tryExpandPlaylist(job.ID, rawURL, opts, "web", 0)
 }
 
-// createPlaylistJobs создаёт отдельные job'ы для каждого видео из плейлиста
-// и назначает тег с названием плейлиста.
-func (h *QueueHandler) createPlaylistJobs(r *http.Request, info *downloader.PlaylistInfo, source string, chatID int64) {
-	ctx := r.Context()
+// tryExpandPlaylist проверяет URL на плейлист асинхронно.
+// Placeholder создан в статусе "checking" — воркер его не трогает.
+// Если одиночное видео: переводим в pending. Если плейлист: удаляем placeholder, создаём отдельные jobs.
+func (h *QueueHandler) tryExpandPlaylist(placeholderID, rawURL string, opts downloader.Options, source string, chatID int64) {
+	ctx := context.Background()
+	info := downloader.FetchPlaylist(ctx, rawURL, opts)
+	if info == nil {
+		// Одиночное видео — переводим checking → pending, даём воркеру сигнал.
+		if err := h.Jobs.ConfirmSingle(ctx, placeholderID); err != nil {
+			slog.Error("queue: confirm single", "id", placeholderID, "err", err)
+			return
+		}
+		h.Pool.Enqueue()
+		return
+	}
 
+	// Плейлист: удаляем placeholder и создаём индивидуальные jobs.
+	if err := h.Jobs.DeleteChecking(ctx, placeholderID); err != nil {
+		slog.Error("queue: delete checking placeholder", "id", placeholderID, "err", err)
+	}
+	h.doCreatePlaylistJobs(ctx, info, source, chatID)
+	h.Pool.Enqueue()
+}
+
+// createPlaylistJobs используется Telegram-ботом (синхронно, с контекстом запроса).
+func (h *QueueHandler) createPlaylistJobs(r *http.Request, info *downloader.PlaylistInfo, source string, chatID int64) {
+	h.doCreatePlaylistJobs(r.Context(), info, source, chatID)
+}
+
+// doCreatePlaylistJobs создаёт отдельные job'ы для каждого видео из плейлиста
+// и назначает тег с названием плейлиста.
+func (h *QueueHandler) doCreatePlaylistJobs(ctx context.Context, info *downloader.PlaylistInfo, source string, chatID int64) {
 	var tagID string
 	if info.PlaylistTitle != "" && h.Tags != nil {
 		if tag, err := h.Tags.Upsert(ctx, info.PlaylistTitle); err == nil {
@@ -105,10 +134,21 @@ func (h *QueueHandler) createPlaylistJobs(r *http.Request, info *downloader.Play
 	}
 }
 
-// Delete отменяет pending-задачу.
+// Delete отменяет задачу в любом статусе:
+//   - running/retrying → убивает yt-dlp процесс (воркер сам проставит cancelled)
+//   - pending/retrying  → мягкая отмена через БД (статус cancelled, запись остаётся)
 func (h *QueueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := h.Jobs.Delete(r.Context(), id); err != nil {
+
+	// Сначала пробуем остановить активный download (running).
+	if h.Pool.CancelJob(id) {
+		w.Header().Set("HX-Trigger", "mediaRefresh")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Для pending / retrying — мягкая отмена через БД.
+	if err := h.Jobs.Cancel(r.Context(), id); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

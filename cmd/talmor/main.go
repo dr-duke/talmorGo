@@ -61,6 +61,7 @@ func main() {
 	}
 
 	checker := worker.NewFileChecker(fileRepo, cfg.FileCheckInterval)
+	dirScanner := worker.NewDirScanner(jobRepo, fileRepo, cfg.YtDlpOutputDir, cfg.DirScanInterval)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -75,6 +76,7 @@ func main() {
 	go pool.Start(ctx)
 	go tgBot.Start(ctx)
 	go checker.Start(ctx)
+	go dirScanner.Start(ctx)
 
 	<-ctx.Done()
 	slog.Info("shutting down…")

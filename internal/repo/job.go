@@ -106,7 +106,7 @@ func (r *sqliteJobRepo) runMediaQuery(ctx context.Context, q string, args ...any
 
 // ListMedia возвращает:
 //   - одну строку на каждый файл (один job → N файлов → N строк)
-//   - плюс одну строку на job без файлов (pending/running/retrying/failed)
+//   - плюс одну строку на job без файлов (pending/running/retrying/failed/cancelled)
 func (r *sqliteJobRepo) ListMedia(ctx context.Context) ([]*model.MediaItem, error) {
 	q := mediaRowSQL + `
 		FROM files f
@@ -117,7 +117,7 @@ func (r *sqliteJobRepo) ListMedia(ctx context.Context) ([]*model.MediaItem, erro
 		` + mediaRowSQL + `
 		FROM jobs j
 		LEFT JOIN files f ON f.id = NULL  -- всегда NULL, нужно для совпадения колонок
-		WHERE j.status IN ('pending','running','retrying','failed')
+		WHERE j.status IN ('checking','pending','running','retrying','failed','cancelled')
 		  AND NOT EXISTS (SELECT 1 FROM files WHERE job_id = j.id)
 
 		ORDER BY sort_ts DESC
@@ -140,7 +140,7 @@ func (r *sqliteJobRepo) SearchMedia(ctx context.Context, query string) ([]*model
 		` + mediaRowSQL + `
 		FROM jobs j
 		LEFT JOIN files f ON f.id = NULL
-		WHERE j.status IN ('pending','running','retrying','failed')
+		WHERE j.status IN ('checking','pending','running','retrying','failed','cancelled')
 		  AND NOT EXISTS (SELECT 1 FROM files WHERE job_id = j.id)
 		  AND (j.url LIKE ? OR j.title LIKE ?
 		       OR j.id IN (SELECT jt2.job_id FROM job_tags jt2
@@ -264,6 +264,36 @@ func (r *sqliteJobRepo) Update(ctx context.Context, job *model.Job) error {
 	return err
 }
 
+// Cancel переводит pending или retrying задание в статус cancelled (мягкая отмена без удаления из БД).
+// Для running заданий отмена происходит через worker.Pool.CancelJob — он сам проставит статус.
+func (r *sqliteJobRepo) Cancel(ctx context.Context, id string) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE jobs SET status='cancelled', next_retry_at=NULL, updated_at=? WHERE id=? AND status IN ('pending','retrying')`,
+		time.Now().UTC().Format(time.RFC3339Nano), id,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("job %s not found or not cancellable", id)
+	}
+	return nil
+}
+
+func (r *sqliteJobRepo) ConfirmSingle(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE jobs SET status='pending', updated_at=? WHERE id=? AND status='checking'`,
+		time.Now().UTC().Format(time.RFC3339Nano), id,
+	)
+	return err
+}
+
+func (r *sqliteJobRepo) DeleteChecking(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id=? AND status='checking'`, id)
+	return err
+}
+
 func (r *sqliteJobRepo) Delete(ctx context.Context, id string) error {
 	res, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id=? AND status='pending'`, id)
 	if err != nil {
@@ -304,8 +334,10 @@ func (r *sqliteJobRepo) Redownload(ctx context.Context, id string) error {
 }
 
 func (r *sqliteJobRepo) ResetStale(ctx context.Context) error {
+	// running → pending (воркер упал в момент скачивания)
+	// checking → pending (сервер упал пока горутина проверяла плейлист)
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE jobs SET status='pending', updated_at=? WHERE status='running'`,
+		`UPDATE jobs SET status='pending', updated_at=? WHERE status IN ('running','checking')`,
 		time.Now().UTC().Format(time.RFC3339Nano),
 	)
 	return err

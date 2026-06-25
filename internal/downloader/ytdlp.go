@@ -158,7 +158,7 @@ func lastErrorLine(lines []string) string {
 func buildArgs(url string, opts Options) []string {
 	args := []string{
 		"-o", "%(title)s.%(ext)s",
-		"--print", "post_process:filename",
+		"--print", "after_move:filename",
 		"--no-simulate",
 		// Выбираем лучший видео+аудио; фолбек на best combined если раздельных треков нет.
 		"-f", "bv*+ba/b",
