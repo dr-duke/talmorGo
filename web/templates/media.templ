@@ -223,6 +223,16 @@ templ mediaRow(item *model.MediaItem) {
 					title="Удалить файл"
 				><span class="m3-icon">delete</span></button>
 			}
+			<!-- Скрыть отменённый джоб -->
+			if item.Job.Status == model.JobCancelled {
+				<button
+					class="m3-icon-btn m3-icon-btn-danger"
+					hx-post={ fmt.Sprintf("jobs/%s/hide", item.Job.ID) }
+					hx-swap="none"
+					hx-confirm="Скрыть запись?"
+					title="Скрыть"
+				><span class="m3-icon">visibility_off</span></button>
+			}
 			<!-- Удалить deleted/missing файл → скрыть запись -->
 			if item.File != nil && (item.File.IsDeleted() || item.File.IsLost()) {
 				<button
