@@ -509,24 +509,26 @@ func mediaRow(item *model.MediaItem) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<button class=\"m3-icon-btn\" data-url=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
+		if item.Job.Source != "filesystem" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<button class=\"m3-icon-btn\" data-url=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var31 string
+			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(item.Job.URL)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 164, Col: 28}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" onclick=\"copyOriginalURL(this.dataset.url)\" title=\"Скопировать исходную ссылку\"><span class=\"m3-icon\">content_copy</span></button> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
-		var templ_7745c5c3_Var31 string
-		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(item.Job.URL)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 163, Col: 27}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" onclick=\"copyOriginalURL(this.dataset.url)\" title=\"Скопировать исходную ссылку\"><span class=\"m3-icon\">content_copy</span></button> ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if item.Job.Status != model.JobPending && item.Job.Status != model.JobChecking {
+		if item.Job.Source != "filesystem" && item.Job.Status != model.JobPending && item.Job.Status != model.JobChecking {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<button class=\"m3-icon-btn\" data-job-id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -534,7 +536,7 @@ func mediaRow(item *model.MediaItem) templ.Component {
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(item.Job.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 170, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 172, Col: 30}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 			if templ_7745c5c3_Err != nil {
@@ -547,7 +549,7 @@ func mediaRow(item *model.MediaItem) templ.Component {
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(item.DisplayTitle())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 171, Col: 37}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 173, Col: 37}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 			if templ_7745c5c3_Err != nil {
@@ -566,7 +568,7 @@ func mediaRow(item *model.MediaItem) templ.Component {
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(item.File.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 179, Col: 32}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 181, Col: 32}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 			if templ_7745c5c3_Err != nil {
@@ -579,7 +581,7 @@ func mediaRow(item *model.MediaItem) templ.Component {
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(item.File.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 180, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 182, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {
@@ -590,7 +592,7 @@ func mediaRow(item *model.MediaItem) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		if item.Job.Status == model.JobDone || item.EffectiveStatus() == "missing" || item.EffectiveStatus() == "deleted" || item.Job.Status == model.JobFailed || item.Job.Status == model.JobCancelled {
+		if item.Job.Source != "filesystem" && (item.Job.Status == model.JobDone || item.EffectiveStatus() == "missing" || item.EffectiveStatus() == "deleted" || item.Job.Status == model.JobFailed || item.Job.Status == model.JobCancelled) {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<button class=\"m3-icon-btn\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -598,7 +600,7 @@ func mediaRow(item *model.MediaItem) templ.Component {
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("jobs/%s/redownload", item.Job.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 188, Col: 61}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 190, Col: 61}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -617,7 +619,7 @@ func mediaRow(item *model.MediaItem) templ.Component {
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("queue/%s", item.Job.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 198, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 200, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 			if templ_7745c5c3_Err != nil {
@@ -636,7 +638,7 @@ func mediaRow(item *model.MediaItem) templ.Component {
 			var templ_7745c5c3_Var38 string
 			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("jobs/%s/retry", item.Job.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 208, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 210, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 			if templ_7745c5c3_Err != nil {
@@ -659,7 +661,7 @@ func mediaRow(item *model.MediaItem) templ.Component {
 			var templ_7745c5c3_Var39 string
 			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("files/%s", item.File.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 217, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 219, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 			if templ_7745c5c3_Err != nil {
@@ -672,7 +674,7 @@ func mediaRow(item *model.MediaItem) templ.Component {
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Удалить %s?", item.DisplayTitle()))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 220, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 222, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 			if templ_7745c5c3_Err != nil {
@@ -695,7 +697,7 @@ func mediaRow(item *model.MediaItem) templ.Component {
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("files/%s", item.File.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 228, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/media.templ`, Line: 230, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
@@ -751,6 +753,8 @@ func statusLabel(s string) string {
 		return "отменено"
 	case "hidden":
 		return "скрыт"
+	case "imported":
+		return "импортирован"
 	default:
 		return s
 	}

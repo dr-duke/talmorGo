@@ -15,6 +15,7 @@ const (
 	JobDone      JobStatus = "done"
 	JobFailed    JobStatus = "failed"
 	JobCancelled JobStatus = "cancelled"
+	JobImported  JobStatus = "imported"  // файл найден сканером на диске, не скачан ботом
 )
 
 type Job struct {
@@ -83,7 +84,7 @@ func (m *MediaItem) EffectiveStatus() string {
 	if m.File != nil && m.File.LostAt != nil {
 		return "missing"
 	}
-	if m.File != nil && m.File.DeletedAt != nil && m.Job.Status == JobDone {
+	if m.File != nil && m.File.DeletedAt != nil && (m.Job.Status == JobDone || m.Job.Status == JobImported) {
 		return "deleted"
 	}
 	return string(m.Job.Status)

@@ -112,7 +112,7 @@ func (s *DirScanner) importFile(ctx context.Context, path, name string, size int
 	job := &model.Job{
 		URL:    "local",
 		Title:  name,
-		Status: model.JobDone,
+		Status: model.JobImported,
 		Source: "filesystem",
 	}
 	if err := s.jobs.Create(ctx, job); err != nil {

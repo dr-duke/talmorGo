@@ -158,13 +158,15 @@ templ mediaRow(item *model.MediaItem) {
 					title="Постоянная ссылка"
 				><span class="m3-icon">link</span></button>
 			}
-			<button
-				class="m3-icon-btn"
-				data-url={ item.Job.URL }
-				onclick="copyOriginalURL(this.dataset.url)"
-				title="Скопировать исходную ссылку"
-			><span class="m3-icon">content_copy</span></button>
-			if item.Job.Status != model.JobPending && item.Job.Status != model.JobChecking {
+			if item.Job.Source != "filesystem" {
+				<button
+					class="m3-icon-btn"
+					data-url={ item.Job.URL }
+					onclick="copyOriginalURL(this.dataset.url)"
+					title="Скопировать исходную ссылку"
+				><span class="m3-icon">content_copy</span></button>
+			}
+			if item.Job.Source != "filesystem" && item.Job.Status != model.JobPending && item.Job.Status != model.JobChecking {
 				<button
 					class="m3-icon-btn"
 					data-job-id={ item.Job.ID }
@@ -182,7 +184,7 @@ templ mediaRow(item *model.MediaItem) {
 					title="Переименовать"
 				><span class="m3-icon">edit</span></button>
 			}
-			if item.Job.Status == model.JobDone || item.EffectiveStatus() == "missing" || item.EffectiveStatus() == "deleted" || item.Job.Status == model.JobFailed || item.Job.Status == model.JobCancelled {
+			if item.Job.Source != "filesystem" && (item.Job.Status == model.JobDone || item.EffectiveStatus() == "missing" || item.EffectiveStatus() == "deleted" || item.Job.Status == model.JobFailed || item.Job.Status == model.JobCancelled) {
 				<button
 					class="m3-icon-btn"
 					hx-post={ fmt.Sprintf("jobs/%s/redownload", item.Job.ID) }
@@ -273,6 +275,8 @@ func statusLabel(s string) string {
 		return "отменено"
 	case "hidden":
 		return "скрыт"
+	case "imported":
+		return "импортирован"
 	default:
 		return s
 	}

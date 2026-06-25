@@ -50,6 +50,7 @@ templ Layout(title string, basePath string) {
 					--c-missing:   #5c3d1a;
 					--c-deleted:   #3a3a3a;
 					--c-cancelled: #4a3a4a;
+					--c-imported:  #1a3a4a;
 				}
 
 				html, body { height: 100%; background: var(--m3-bg); color: var(--m3-on-surface); }
@@ -166,6 +167,7 @@ templ Layout(title string, basePath string) {
 				.badge-deleted   { background: var(--c-deleted);   color: #718096; }
 				.badge-cancelled { background: var(--c-cancelled); color: #c9a8e0; }
 				.badge-hidden    { background: var(--m3-surface-var); color: var(--m3-outline); }
+				.badge-imported  { background: var(--c-imported);   color: #63b3ed; }
 
 				/* Статус-чип в строке — курсор pointer, hover чуть ярче */
 				.m3-chip-status { cursor: pointer; }
@@ -455,7 +457,7 @@ templ Layout(title string, basePath string) {
 					'checking':'проверка…','pending':'ожидание','running':'скачивается',
 					'retrying':'повтор','done':'готово','failed':'ошибка',
 					'missing':'отсутствует','deleted':'удалён','cancelled':'отменено',
-					'hidden':'скрытые'
+					'hidden':'скрытые','imported':'импортированы'
 				};
 
 				// Активировать статус-фильтр (вызывается из чипа внутри строки).
