@@ -61,7 +61,7 @@ func main() {
 	}
 
 	checker := worker.NewFileChecker(fileRepo, cfg.FileCheckInterval)
-	dirScanner := worker.NewDirScanner(jobRepo, fileRepo, cfg.YtDlpOutputDir, cfg.DirScanInterval)
+	dirScanner := worker.NewDirScanner(jobRepo, fileRepo, cfg.YtDlpOutputDir, cfg.DirScanInterval, pool.InFlight())
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

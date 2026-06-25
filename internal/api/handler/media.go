@@ -97,6 +97,27 @@ func (h *MediaHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.List(w, r)
 }
 
+// PurgeJob безвозвратно удаляет hidden job, его файлы из БД и с диска.
+func (h *MediaHandler) PurgeJob(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+
+	// Удаляем физические файлы с диска.
+	if files, err := h.Files.ListByJobID(r.Context(), jobID); err == nil {
+		for _, f := range files {
+			if f.IsAvailable() {
+				os.Remove(f.Path) //nolint:errcheck
+			}
+		}
+	}
+
+	if err := h.Jobs.Purge(r.Context(), jobID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("HX-Trigger", "mediaRefresh")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // Hide скрывает job из основного интерфейса (только для hidden jobs в «скрытых»).
 func (h *MediaHandler) Hide(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")

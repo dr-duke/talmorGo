@@ -405,6 +405,16 @@ func (r *sqliteJobRepo) GetLog(ctx context.Context, jobID string) (string, error
 	return v.String, nil
 }
 
+// Purge безвозвратно удаляет hidden job, его файлы (tokens каскадно) и теги (каскадно).
+// Порядок важен: файлы удаляются до job, иначе SET NULL на files.job_id помешает WHERE.
+func (r *sqliteJobRepo) Purge(ctx context.Context, id string) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM files WHERE job_id=?`, id); err != nil {
+		return err
+	}
+	_, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id=? AND hidden=1`, id)
+	return err
+}
+
 func nullStr(s string) any {
 	if s == "" {
 		return nil

@@ -31,14 +31,16 @@ type DirScanner struct {
 	files    repo.FileRepo
 	dir      string
 	interval time.Duration
+	inFlight *InFlightPaths // nil означает «не отслеживать»
 }
 
-func NewDirScanner(jobs repo.JobRepo, files repo.FileRepo, dir string, intervalSec int) *DirScanner {
+func NewDirScanner(jobs repo.JobRepo, files repo.FileRepo, dir string, intervalSec int, inFlight *InFlightPaths) *DirScanner {
 	return &DirScanner{
 		jobs:     jobs,
 		files:    files,
 		dir:      dir,
 		interval: time.Duration(intervalSec) * time.Second,
+		inFlight: inFlight,
 	}
 }
 
@@ -89,7 +91,10 @@ func (s *DirScanner) scan(ctx context.Context) {
 			return nil
 		}
 		if _, ok := known[path]; ok {
-			return nil // уже известен
+			return nil // уже известен в БД
+		}
+		if s.inFlight != nil && s.inFlight.Contains(path) {
+			return nil // воркер уже обрабатывает этот файл
 		}
 		info, infoErr := d.Info()
 		if infoErr != nil {

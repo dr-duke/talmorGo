@@ -53,6 +53,7 @@ type Pool struct {
 	tokenRepo repo.TokenRepo
 	notifier  Notifier
 	notify    chan struct{}
+	inFlight  *InFlightPaths
 
 	mu          sync.Mutex
 	cancelFuncs map[string]context.CancelFunc // jobID → cancel активной закачки
@@ -67,8 +68,13 @@ func NewPool(cfg *config.Config, jobRepo repo.JobRepo, fileRepo repo.FileRepo, t
 		notifier:    notifier,
 		notify:      make(chan struct{}, cfg.WorkerCount),
 		cancelFuncs: make(map[string]context.CancelFunc),
+		inFlight:    NewInFlightPaths(),
 	}
 }
+
+// InFlight возвращает набор путей, активно обрабатываемых воркерами.
+// Используется DirScanner для исключения файлов в процессе закачки.
+func (p *Pool) InFlight() *InFlightPaths { return p.inFlight }
 
 // CancelJob прерывает активно скачиваемый job. Возвращает true если job был running.
 func (p *Pool) CancelJob(jobID string) bool {
@@ -214,10 +220,15 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 			Name:  event.FileName,
 			Size:  info.Size(),
 		}
+		// Регистрируем путь до записи в БД — сканер не будет импортировать файл в этом окне.
+		p.inFlight.Add(event.Path)
 		if err := p.fileRepo.Create(ctx, f); err != nil {
+			p.inFlight.Remove(event.Path)
 			slog.Error("worker: save file record", "err", err)
 			continue
 		}
+		// Путь теперь в БД — AllPaths его видит; убираем из inFlight.
+		p.inFlight.Remove(event.Path)
 		slog.Info("worker: file saved", "name", f.Name, "id", f.ID)
 		fileCount++
 		if firstFile == nil {

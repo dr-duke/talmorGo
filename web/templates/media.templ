@@ -223,6 +223,16 @@ templ mediaRow(item *model.MediaItem) {
 					title="Удалить файл"
 				><span class="m3-icon">delete</span></button>
 			}
+			<!-- Безвозвратное удаление скрытой записи -->
+			if item.Job.Hidden {
+				<button
+					class="m3-icon-btn m3-icon-btn-danger"
+					hx-delete={ fmt.Sprintf("jobs/%s", item.Job.ID) }
+					hx-swap="none"
+					hx-confirm="Удалить навсегда? Восстановить будет невозможно."
+					title="Удалить навсегда"
+				><span class="m3-icon">delete_forever</span></button>
+			}
 			<!-- Скрыть отменённый джоб -->
 			if item.Job.Status == model.JobCancelled {
 				<button
