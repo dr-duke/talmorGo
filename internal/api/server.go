@@ -36,7 +36,7 @@ func New(
 	mh := &handler.MediaHandler{
 		Jobs: jobs, Files: files, Tags: tags,
 		Tokens: tokens, Storage: store,
-		BaseURL: cfg.BaseURL, Pool: pool,
+		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg,
 	}
 	lh := &handler.LinkHandler{Tokens: tokens, Files: files}
 
@@ -62,6 +62,7 @@ func New(
 	mux.HandleFunc("PATCH /files/{id}", mh.Rename)
 	mux.HandleFunc("POST /files/{id}/link", mh.CreateLink)
 	mux.HandleFunc("POST /jobs/{id}/redownload", mh.Redownload)
+	mux.HandleFunc("POST /jobs/{id}/hide", mh.Hide)
 	mux.HandleFunc("POST /jobs/{id}/tags", mh.AddTag)
 	mux.HandleFunc("DELETE /jobs/{id}/tags/{tag}", mh.RemoveTag)
 	mux.HandleFunc("GET /jobs/{id}/log", mh.Log)

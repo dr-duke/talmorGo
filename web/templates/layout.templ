@@ -155,21 +155,27 @@ templ Layout(title string, basePath string) {
 				}
 				.chip-remove:hover { opacity: 1; }
 
-				/* ── M3 Badge ── */
-				.m3-badge {
-					display: inline-flex; align-items: center;
-					font-size: .7rem; font-weight: 500; padding: .15rem .5rem;
-					border-radius: 9999px; white-space: nowrap;
-				}
-				.badge-checking { background: var(--c-checking); color: #90aad0; }
-				.badge-pending  { background: var(--c-pending);  color: #a0aec0; }
-				.badge-running  { background: var(--c-running);  color: #68d391; }
-				.badge-retrying { background: var(--c-retrying); color: #f6ad55; }
-				.badge-done     { background: var(--c-done);     color: #68d391; }
-				.badge-failed   { background: var(--c-failed);   color: #fc8181; }
+				/* ── Status badge colours (shared by chips и строками) ── */
+				.badge-checking  { background: var(--c-checking);  color: #90aad0; }
+				.badge-pending   { background: var(--c-pending);   color: #a0aec0; }
+				.badge-running   { background: var(--c-running);   color: #68d391; }
+				.badge-retrying  { background: var(--c-retrying);  color: #f6ad55; }
+				.badge-done      { background: var(--c-done);      color: #68d391; }
+				.badge-failed    { background: var(--c-failed);    color: #fc8181; }
 				.badge-missing   { background: var(--c-missing);   color: #f6ad55; }
 				.badge-deleted   { background: var(--c-deleted);   color: #718096; }
 				.badge-cancelled { background: var(--c-cancelled); color: #c9a8e0; }
+				.badge-hidden    { background: var(--m3-surface-var); color: var(--m3-outline); }
+
+				/* Статус-чип в строке — курсор pointer, hover чуть ярче */
+				.m3-chip-status { cursor: pointer; }
+				.m3-chip-status:hover { filter: brightness(1.2); }
+
+				/* Скрытые строки скрыты по умолчанию; JS-фильтр управляет видимостью */
+				.media-row.is-hidden { display: none; }
+
+				/* Чип «скрытые» в фильтре — особый вид */
+				.m3-chip-hidden { border: 1px dashed var(--m3-outline); }
 
 				/* ── Media list ── */
 				.media-list {
@@ -444,33 +450,91 @@ templ Layout(title string, basePath string) {
 
 				// ── Client-side filtering ──
 				var _activeTag = null;
+
+				var _statusLabels = {
+					'checking':'проверка…','pending':'ожидание','running':'скачивается',
+					'retrying':'повтор','done':'готово','failed':'ошибка',
+					'missing':'отсутствует','deleted':'удалён','cancelled':'отменено',
+					'hidden':'скрытые'
+				};
+
+				// Активировать статус-фильтр (вызывается из чипа внутри строки).
+				function activateStatusFilter(tag) {
+					var existing = document.querySelector('#status-chips [data-tag="' + tag + '"]');
+					if (existing) { toggleTagFilter(existing); } else { setActiveTag(tag); applyFilters(); }
+				}
+
 				function toggleTagFilter(btn) {
 					var tag = btn.dataset.tag;
 					if (_activeTag === tag) {
-						_activeTag = null;
-						btn.classList.remove('active');
+						setActiveTag(null);
 					} else {
-						document.querySelectorAll('.tag-filter-row .m3-chip').forEach(function(b) { b.classList.remove('active'); });
-						_activeTag = tag;
-						btn.classList.add('active');
+						setActiveTag(tag);
 					}
 					applyFilters();
 				}
+
+				function setActiveTag(tag) {
+					_activeTag = tag;
+					// Снимаем active со всех фильтр-чипов.
+					document.querySelectorAll('.tag-filter-row .m3-chip, #status-chips .m3-chip').forEach(function(b) {
+						b.classList.toggle('active', b.dataset.tag === tag);
+					});
+				}
+
 				function applyFilters() {
 					var q = (document.getElementById('media-search') || {value:''}).value.toLowerCase();
+					var showHidden = _activeTag === 'hidden';
 					document.querySelectorAll('.media-row').forEach(function(row) {
+						var isHiddenRow = row.classList.contains('is-hidden');
+						// Режим «скрытые»: показываем только скрытые строки.
+						if (showHidden) { row.style.display = isHiddenRow ? '' : 'none'; return; }
+						// Обычный режим: скрытые строки не видны.
+						if (isHiddenRow) { row.style.display = 'none'; return; }
+
 						var text = (row.dataset.title + ' ' + row.dataset.url + ' ' + row.dataset.domain).toLowerCase();
-						var tags = row.dataset.tags || '';
-						var matchSearch = !q || text.includes(q) || tags.toLowerCase().includes(q);
-						var matchTag = !_activeTag || tags.split(',').indexOf(_activeTag) >= 0;
+						var tags = (row.dataset.tags || '').split(',');
+						var matchSearch = !q || text.includes(q) || tags.some(function(t){ return t.toLowerCase().includes(q); });
+						var matchTag = !_activeTag || tags.indexOf(_activeTag) >= 0;
 						row.style.display = (matchSearch && matchTag) ? '' : 'none';
 					});
 				}
-				// Переприменяем фильтр после HTMX-обновления
+
+				// Строим чипы статусов из текущих данных.
+				function rebuildStatusChips() {
+					var seen = {}, order = [];
+					document.querySelectorAll('.media-row').forEach(function(row) {
+						var s = (row.dataset.tags || '').split(',')[0];
+						if (s && !seen[s]) { seen[s] = true; order.push(s); }
+					});
+					// «скрытые» всегда последним.
+					if (!seen['hidden']) order.push('hidden');
+
+					var container = document.getElementById('status-chips');
+					if (!container) return;
+					container.innerHTML = '';
+					order.forEach(function(s) {
+						var btn = document.createElement('button');
+						btn.className = 'm3-chip' + (s === 'hidden' ? ' m3-chip-hidden' : '');
+						btn.dataset.tag = s;
+						btn.textContent = _statusLabels[s] || s;
+						if (_activeTag === s) btn.classList.add('active');
+						btn.addEventListener('click', function() { toggleTagFilter(this); });
+						container.appendChild(btn);
+					});
+				}
+
+				// Переприменяем фильтр и пересобираем чипы после HTMX-обновления.
 				document.body.addEventListener('htmx:afterSwap', function(e) {
 					if (e.detail.target && e.detail.target.id === 'media-inner') {
+						rebuildStatusChips();
 						applyFilters();
 					}
+				});
+				// Первый запуск.
+				document.addEventListener('DOMContentLoaded', function() {
+					rebuildStatusChips();
+					applyFilters();
 				});
 			</script>
 		</body>

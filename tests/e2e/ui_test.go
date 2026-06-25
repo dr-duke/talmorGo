@@ -400,15 +400,17 @@ func TestRedownloadSetsPending(t *testing.T) {
 		t.Fatalf("redownload: %v", err)
 	}
 
-	var pendingCount int
+	// После redownload job переходит в checking (async → pending).
+	// Принимаем оба статуса как «в очереди».
+	var inQueueCount int
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.querySelectorAll('.status-pending').length`, &pendingCount),
+		chromedp.Evaluate(`document.querySelectorAll('.status-checking, .status-pending').length`, &inQueueCount),
 	)
 	if err != nil {
-		t.Fatalf("count pending: %v", err)
+		t.Fatalf("count in-queue: %v", err)
 	}
-	if pendingCount == 0 {
-		t.Error("no pending row after redownload; expected status-pending")
+	if inQueueCount == 0 {
+		t.Error("no checking/pending row after redownload; expected job back in queue")
 	}
 }
 
@@ -621,11 +623,11 @@ func TestDeletedFileAllowsRedownload(t *testing.T) {
 		t.Fatalf("redownload from deleted: %v", err)
 	}
 
-	var pendingCount int
+	var inQueueCount int
 	if err := chromedp.Run(ctx, chromedp.Evaluate(
-		`document.querySelectorAll('.status-pending').length`, &pendingCount,
-	)); err != nil || pendingCount == 0 {
-		t.Errorf("expected .status-pending after redownload from deleted, got %d", pendingCount)
+		`document.querySelectorAll('.status-checking, .status-pending').length`, &inQueueCount,
+	)); err != nil || inQueueCount == 0 {
+		t.Errorf("expected job back in queue after redownload from deleted, got %d", inQueueCount)
 	}
 }
 
@@ -687,11 +689,12 @@ func TestRemoveTagUpdatesRow(t *testing.T) {
 		t.Fatalf("remove tag: %v", err)
 	}
 
+	// Считаем только пользовательские теги; статус-чип (.m3-chip-status) не считается.
 	var chipCount int
 	if err := chromedp.Run(ctx, chromedp.Evaluate(
-		`document.querySelectorAll('.m3-chip-sm').length`, &chipCount,
+		`document.querySelectorAll('.m3-chip-sm:not(.m3-chip-status)').length`, &chipCount,
 	)); err != nil || chipCount != 0 {
-		t.Errorf("expected no tag chips after remove, got %d", chipCount)
+		t.Errorf("expected no user tag chips after remove, got %d", chipCount)
 	}
 }
 
@@ -809,11 +812,11 @@ func TestCancelledJobAllowsRedownload(t *testing.T) {
 		t.Fatalf("redownload from cancelled: %v", err)
 	}
 
-	var pendingCount int
+	var inQueueCount int
 	if err := chromedp.Run(ctx, chromedp.Evaluate(
-		`document.querySelectorAll('.status-pending').length`, &pendingCount,
-	)); err != nil || pendingCount == 0 {
-		t.Errorf("expected .status-pending after redownload from cancelled, got %d", pendingCount)
+		`document.querySelectorAll('.status-checking, .status-pending').length`, &inQueueCount,
+	)); err != nil || inQueueCount == 0 {
+		t.Errorf("expected job back in queue after redownload from cancelled, got %d", inQueueCount)
 	}
 }
 

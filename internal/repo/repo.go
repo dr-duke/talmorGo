@@ -29,6 +29,8 @@ type JobRepo interface {
 	// DeleteChecking удаляет checking-задание (URL оказался плейлистом, создаём отдельные jobs).
 	DeleteChecking(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
+	// Hide скрывает запись из интерфейса (переход из deleted/missing по повторному нажатию delete).
+	Hide(ctx context.Context, id string) error
 	ResetFailed(ctx context.Context, id string) error
 	ResetStale(ctx context.Context) error
 	// Redownload сбрасывает задание в pending и очищает привязку к файлу.

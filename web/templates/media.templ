@@ -28,14 +28,19 @@ templ MediaTab(items []*model.MediaItem, tags []*model.Tag) {
 			placeholder="Поиск по названию, URL, домену…"
 			oninput="applyFilters()"
 		/>
-		<div id="tag-filters" class="tag-filter-row">
-			for _, t := range tags {
-				<button
-					class="m3-chip"
-					data-tag={ t.Name }
-					onclick="toggleTagFilter(this)"
-				>{ t.Name }</button>
-			}
+		<div class="tag-filter-row">
+			<!-- Чипы статусов — строятся JS-ом из текущих данных -->
+			<div id="status-chips"></div>
+			<!-- Пользовательские теги из БД -->
+			<div id="tag-filters" style="display:contents">
+				for _, t := range tags {
+					<button
+						class="m3-chip"
+						data-tag={ t.Name }
+						onclick="toggleTagFilter(this)"
+					>{ t.Name }</button>
+				}
+			</div>
 		</div>
 	</div>
 	@MediaList(items, tags)
@@ -65,12 +70,11 @@ templ MediaList(items []*model.MediaItem, tags []*model.Tag) {
 
 templ mediaRow(item *model.MediaItem) {
 	<div
-		class={ "media-row", "status-" + item.EffectiveStatus() }
+		class={ "media-row", "status-" + item.EffectiveStatus(), templ.KV("is-hidden", item.Job.Hidden) }
 		data-title={ item.DisplayTitle() }
 		data-url={ item.Job.URL }
 		data-domain={ item.Job.Domain() }
-		data-tags={ joinTags(item.Tags) }
-		data-status={ item.EffectiveStatus() }
+		data-tags={ joinTagsWithStatus(item.EffectiveStatus(), item.Tags) }
 		if item.File != nil && item.File.IsAvailable() {
 			data-stream={ fmt.Sprintf("files/%s/stream", item.File.ID) }
 			onclick="openPlayer(this.dataset.stream, this.dataset.title)"
@@ -91,7 +95,6 @@ templ mediaRow(item *model.MediaItem) {
 		<div class="media-info">
 			<div class="media-title">{ item.DisplayTitle() }</div>
 			<div class="media-meta">
-				<span class={ "m3-badge", "badge-" + item.EffectiveStatus() }>{ statusLabel(item.EffectiveStatus()) }</span>
 				if item.File != nil && item.File.IsAvailable() {
 					<span class="meta-size">{ formatSize(item.File.Size) }</span>
 				}
@@ -99,6 +102,13 @@ templ mediaRow(item *model.MediaItem) {
 					<span class="meta-retry">{ retryIn(item.Job.NextRetryAt) }</span>
 				}
 				<span class="tag-chips">
+					<!-- Статус — первый чип, не удаляемый -->
+					<button
+						class={ "m3-chip", "m3-chip-sm", "m3-chip-status", "badge-" + item.EffectiveStatus() }
+						data-tag={ item.EffectiveStatus() }
+						onclick="event.stopPropagation();activateStatusFilter(this.dataset.tag)"
+						title="Фильтр по статусу"
+					>{ statusLabel(item.EffectiveStatus()) }</button>
 					for _, tag := range item.Tags {
 						<span class="m3-chip m3-chip-sm">
 							{ tag }
@@ -154,7 +164,7 @@ templ mediaRow(item *model.MediaItem) {
 				onclick="copyOriginalURL(this.dataset.url)"
 				title="Скопировать исходную ссылку"
 			><span class="m3-icon">content_copy</span></button>
-			if item.Job.Status != model.JobPending {
+			if item.Job.Status != model.JobPending && item.Job.Status != model.JobChecking {
 				<button
 					class="m3-icon-btn"
 					data-job-id={ item.Job.ID }
@@ -172,7 +182,7 @@ templ mediaRow(item *model.MediaItem) {
 					title="Переименовать"
 				><span class="m3-icon">edit</span></button>
 			}
-			if item.Job.Status == model.JobDone || item.EffectiveStatus() == "missing" || item.Job.Status == model.JobFailed || item.Job.Status == model.JobCancelled {
+			if item.Job.Status == model.JobDone || item.EffectiveStatus() == "missing" || item.EffectiveStatus() == "deleted" || item.Job.Status == model.JobFailed || item.Job.Status == model.JobCancelled {
 				<button
 					class="m3-icon-btn"
 					hx-post={ fmt.Sprintf("jobs/%s/redownload", item.Job.ID) }
@@ -200,7 +210,8 @@ templ mediaRow(item *model.MediaItem) {
 					title="Повторить"
 				><span class="m3-icon">replay</span></button>
 			}
-			if item.File != nil {
+			<!-- Удалить доступный файл → soft delete -->
+			if item.File != nil && item.File.IsAvailable() {
 				<button
 					class="m3-icon-btn m3-icon-btn-danger"
 					hx-delete={ fmt.Sprintf("files/%s", item.File.ID) }
@@ -210,17 +221,25 @@ templ mediaRow(item *model.MediaItem) {
 					title="Удалить файл"
 				><span class="m3-icon">delete</span></button>
 			}
+			<!-- Удалить deleted/missing файл → скрыть запись -->
+			if item.File != nil && (item.File.IsDeleted() || item.File.IsLost()) {
+				<button
+					class="m3-icon-btn m3-icon-btn-danger"
+					hx-delete={ fmt.Sprintf("files/%s", item.File.ID) }
+					hx-target="#media-inner"
+					hx-swap="outerHTML"
+					hx-confirm="Скрыть запись?"
+					title="Скрыть"
+				><span class="m3-icon">visibility_off</span></button>
+			}
 		</div>
 	</div>
 }
 
-func joinTags(tags []string) string {
-	out := ""
-	for i, t := range tags {
-		if i > 0 {
-			out += ","
-		}
-		out += t
+func joinTagsWithStatus(status string, tags []string) string {
+	out := status
+	for _, t := range tags {
+		out += "," + t
 	}
 	return out
 }
@@ -247,11 +266,13 @@ func statusLabel(s string) string {
 	case "failed":
 		return "ошибка"
 	case "missing":
-		return "файл отсутствует"
+		return "отсутствует"
 	case "deleted":
 		return "удалён"
 	case "cancelled":
 		return "отменено"
+	case "hidden":
+		return "скрыт"
 	default:
 		return s
 	}

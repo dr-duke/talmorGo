@@ -81,6 +81,7 @@ const mediaRowSQL = `
 		j.id, j.url, j.status, j.title, COALESCE(j.file_id,''),
 		j.error, j.source, j.chat_id,
 		j.created_at, j.updated_at, j.retry_count, j.next_retry_at, j.first_failed_at,
+		j.hidden,
 		f.id, f.name, f.size, f.path, f.created_at, f.deleted_at, f.lost_at,
 		(SELECT GROUP_CONCAT(t2.name,'|')
 		 FROM job_tags jt2 JOIN tags t2 ON t2.id=jt2.tag_id WHERE jt2.job_id=j.id) AS tags,
@@ -169,6 +170,7 @@ func scanMediaItem(s scanner) (*model.MediaItem, error) {
 	var createdAt, updatedAt string
 	var nextRetryAt, firstFailedAt sql.NullString
 
+	var hidden int
 	var fileID, fileName, filePath, fileCreatedAt sql.NullString
 	var fileSize sql.NullInt64
 	var fileDeletedAt, fileLostAt sql.NullString
@@ -179,6 +181,7 @@ func scanMediaItem(s scanner) (*model.MediaItem, error) {
 		&j.ID, &j.URL, &j.Status, &j.Title, &j.FileID, &j.Error,
 		&j.Source, &j.ChatID, &createdAt, &updatedAt,
 		&j.RetryCount, &nextRetryAt, &firstFailedAt,
+		&hidden,
 		&fileID, &fileName, &fileSize, &filePath, &fileCreatedAt, &fileDeletedAt, &fileLostAt,
 		&tagNames, &sortTS,
 	)
@@ -197,6 +200,7 @@ func scanMediaItem(s scanner) (*model.MediaItem, error) {
 		j.FirstFailedAt = &t
 	}
 
+	j.Hidden = hidden != 0
 	item := &model.MediaItem{Job: &j}
 
 	if fileID.Valid && fileID.String != "" {
@@ -322,12 +326,22 @@ func (r *sqliteJobRepo) ResetFailed(ctx context.Context, id string) error {
 	return nil
 }
 
-// Redownload сбрасывает задание в pending, очищает file_id и счётчики retry.
+// Redownload сбрасывает задание в checking, очищает file_id и счётчики retry.
+// Статус checking позволяет горутине проверить плейлист до того как воркер возьмёт задание.
+// hidden сбрасывается: перезапрошенное задание снова отображается в интерфейсе.
 func (r *sqliteJobRepo) Redownload(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE jobs SET status='pending', file_id=NULL, title='', error='',
-		  retry_count=0, next_retry_at=NULL, first_failed_at=NULL, updated_at=?
+		`UPDATE jobs SET status='checking', file_id=NULL, title='', error='',
+		  retry_count=0, next_retry_at=NULL, first_failed_at=NULL, hidden=0, updated_at=?
 		 WHERE id=?`,
+		time.Now().UTC().Format(time.RFC3339Nano), id,
+	)
+	return err
+}
+
+func (r *sqliteJobRepo) Hide(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE jobs SET hidden=1, updated_at=? WHERE id=?`,
 		time.Now().UTC().Format(time.RFC3339Nano), id,
 	)
 	return err

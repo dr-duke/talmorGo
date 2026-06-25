@@ -32,6 +32,7 @@ type Job struct {
 	NextRetryAt   *time.Time
 	FirstFailedAt *time.Time
 	TgMessageID   int64
+	Hidden        bool
 }
 
 func (j *Job) DisplayName() string {
@@ -74,10 +75,11 @@ type MediaItem struct {
 	Tags []string
 }
 
-// EffectiveStatus возвращает статус с учётом состояния файла.
-// "deleted" возвращаем только когда job завершён; при pending/running показываем реальный
-// статус job'а, чтобы redownload не маскировался мягко-удалённым файлом.
+// EffectiveStatus возвращает статус с учётом состояния файла и флага скрытия.
 func (m *MediaItem) EffectiveStatus() string {
+	if m.Job.Hidden {
+		return "hidden"
+	}
 	if m.File != nil && m.File.LostAt != nil {
 		return "missing"
 	}
