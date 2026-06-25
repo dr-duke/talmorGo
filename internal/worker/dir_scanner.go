@@ -81,6 +81,10 @@ func (s *DirScanner) scan(ctx context.Context) {
 		if strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
+		// пропускаем временные файлы yt-dlp в процессе скачивания
+		if strings.HasSuffix(d.Name(), ".part") || strings.HasSuffix(d.Name(), ".ytdl") {
+			return nil
+		}
 		if !mediaExtensions[strings.ToLower(filepath.Ext(d.Name()))] {
 			return nil
 		}
