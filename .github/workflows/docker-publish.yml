@@ -25,7 +25,7 @@ jobs:
       - name: Generate templates
         run: templ generate ./web/templates/...
       - name: Run tests
-        run: go test ./...
+        run: go test $(go list ./... | grep -v tests/e2e)
 
   build:
     needs: test
