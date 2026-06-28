@@ -380,49 +380,71 @@ templ Layout(title string, basePath string) {
 						ratio: '16:9',
 					});
 
-					// ── PiP (Picture-in-Picture) ──
 					var pipBtn = document.getElementById('pip-btn');
 					var video  = document.getElementById('plyr-video');
-					if (document.pictureInPictureEnabled) {
-						pipBtn.style.display = '';
+
+					// ── PiP (Picture-in-Picture) ──
+					// iOS < 16 использует webkit API; iOS 16+ и остальные — стандартный W3C API.
+					function _pipSupported() {
+						return document.pictureInPictureEnabled ||
+							(video.webkitSupportsPresentationMode &&
+							 video.webkitSupportsPresentationMode('picture-in-picture'));
 					}
-					video.addEventListener('enterpictureinpicture', function() {
-						pipBtn.querySelector('.m3-icon').textContent = 'picture_in_picture_alt';
-					});
+					function _inPiP() {
+						return document.pictureInPictureElement === video ||
+							video.webkitPresentationMode === 'picture-in-picture';
+					}
+					function _setPipIcon(active) {
+						pipBtn.querySelector('.m3-icon').textContent =
+							active ? 'picture_in_picture_alt' : 'picture_in_picture';
+					}
+					if (_pipSupported()) pipBtn.style.display = '';
+
+					// Стандартные события (Chrome, Firefox, Safari 16+)
+					video.addEventListener('enterpictureinpicture', function() { _setPipIcon(true); });
 					video.addEventListener('leavepictureinpicture', function() {
-						pipBtn.querySelector('.m3-icon').textContent = 'picture_in_picture';
-						// Если диалог уже закрыт — паузим видео
+						_setPipIcon(false);
 						if (!document.getElementById('player-dialog').open) plyrInstance.pause();
+					});
+					// WebKit-события (iOS < 16)
+					video.addEventListener('webkitpresentationmodechanged', function() {
+						var isPiP = video.webkitPresentationMode === 'picture-in-picture';
+						_setPipIcon(isPiP);
+						if (!isPiP && !document.getElementById('player-dialog').open) plyrInstance.pause();
 					});
 
 					// ── Авто-полноэкранный режим при повороте ──
+					// screen.orientation появился в iOS Safari 16.4; старше — window.orientation.
+					function _isLandscape() {
+						if (screen.orientation) return screen.orientation.type.includes('landscape');
+						return Math.abs(window.orientation || 0) === 90;
+					}
 					function _onOrientationChange() {
 						if (!document.getElementById('player-dialog').open) return;
-						// Небольшая задержка — браузер обновляет размеры после события
 						setTimeout(function() {
-							var isLandscape = screen.orientation
-								? screen.orientation.type.includes('landscape')
-								: Math.abs(window.orientation || 0) === 90;
-							if (isLandscape) {
+							if (_isLandscape()) {
 								if (!plyrInstance.fullscreen.active) plyrInstance.fullscreen.enter();
 							} else {
 								if (plyrInstance.fullscreen.active) plyrInstance.fullscreen.exit();
 							}
 						}, 150);
 					}
-					if (screen.orientation) {
-						screen.orientation.addEventListener('change', _onOrientationChange);
-					} else {
-						window.addEventListener('orientationchange', _onOrientationChange);
-					}
+					// Слушаем оба события — modern и legacy
+					if (screen.orientation) screen.orientation.addEventListener('change', _onOrientationChange);
+					window.addEventListener('orientationchange', _onOrientationChange);
 				});
 
 				function togglePiP() {
 					var video = document.getElementById('plyr-video');
-					if (document.pictureInPictureElement) {
-						document.exitPictureInPicture();
-					} else if (document.pictureInPictureEnabled) {
-						video.requestPictureInPicture().catch(function(){});
+					// W3C API (iOS 16+, Chrome, Firefox, Safari desktop)
+					if (document.pictureInPictureEnabled) {
+						if (document.pictureInPictureElement) document.exitPictureInPicture();
+						else video.requestPictureInPicture().catch(function(){});
+					// WebKit API (iOS < 16)
+					} else if (video.webkitSupportsPresentationMode &&
+					           video.webkitSupportsPresentationMode('picture-in-picture')) {
+						var mode = video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture';
+						video.webkitSetPresentationMode(mode);
 					}
 				}
 				function openPlayer(src, title) {
@@ -432,8 +454,11 @@ templ Layout(title string, basePath string) {
 					plyrInstance.play();
 				}
 				function closePlayer() {
-					// Если активен PiP — не паузим (видео продолжает играть в мини-окне)
-					if (!document.pictureInPictureElement) plyrInstance.pause();
+					// PiP активен — не паузим, видео продолжает играть в мини-окне
+					var video = document.getElementById('plyr-video');
+					var inPiP = document.pictureInPictureElement === video ||
+					            video.webkitPresentationMode === 'picture-in-picture';
+					if (!inPiP) plyrInstance.pause();
 					document.getElementById('player-dialog').close();
 				}
 				document.getElementById('player-dialog').addEventListener('click', function(e) {
