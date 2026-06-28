@@ -3,11 +3,10 @@ package worker
 import (
 	"context"
 	"fmt"
-	"io/fs"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -90,20 +89,30 @@ func (p *Pool) CancelJob(jobID string) bool {
 	return ok
 }
 
-// cleanPartialFiles удаляет незавершённые фрагменты yt-dlp (.part, .ytdl) из директории.
-func cleanPartialFiles(dir string) {
-	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error { //nolint:errcheck
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		name := d.Name()
-		if strings.HasSuffix(name, ".part") || strings.HasSuffix(name, ".ytdl") {
-			if rmErr := os.Remove(path); rmErr != nil {
-				slog.Warn("worker: remove partial file", "path", path, "err", rmErr)
-			}
-		}
+// moveFile перемещает файл src→dst. Сначала пробует атомарный rename (один ФС),
+// при ошибке кросс-устройства — копирование с последующим удалением исходника.
+func moveFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
 		return nil
-	})
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(dst) //nolint:errcheck
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Remove(src)
 }
 
 func (p *Pool) SetNotifier(n Notifier) { p.notifier = n }
@@ -118,6 +127,10 @@ func (p *Pool) Enqueue() {
 func (p *Pool) Start(ctx context.Context) {
 	if err := p.jobRepo.ResetStale(ctx); err != nil {
 		slog.Error("worker: reset stale jobs", "err", err)
+	}
+	// Чистим staging от незавершённых загрузок прошлых запусков (после краха).
+	if err := os.RemoveAll(p.cfg.StagingDir()); err != nil {
+		slog.Warn("worker: clean staging dir", "dir", p.cfg.StagingDir(), "err", err)
 	}
 	for i := range p.cfg.WorkerCount {
 		go p.runWorker(ctx, i)
@@ -181,9 +194,19 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		})
 	}
 
+	// Скачиваем в изолированную per-job staging-папку вне зоны сканирования,
+	// затем перемещаем готовый файл в OutputDir. Сканер не видит файл в процессе закачки.
+	jobStaging := filepath.Join(p.cfg.StagingDir(), job.ID)
+	if err := os.MkdirAll(jobStaging, 0o755); err != nil {
+		slog.Error("worker: create staging dir", "dir", jobStaging, "err", err)
+		p.handleFailure(ctx, job, fmt.Errorf("create staging dir: %w", err))
+		return
+	}
+	defer os.RemoveAll(jobStaging) // чистим staging при любом исходе
+
 	opts := downloader.Options{
 		Binary:       p.cfg.YtDlpBinary,
-		OutputDir:    p.cfg.YtDlpOutputDir,
+		OutputDir:    jobStaging,
 		OutputFormat: p.cfg.YtDlpOutputFormat,
 		Proxy:        p.cfg.YtDlpProxy,
 		Timeout:      time.Duration(p.cfg.YtDlpTimeout) * time.Second,
@@ -208,27 +231,37 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 			continue
 		}
 
-		info, err := os.Stat(event.Path)
+		// Перемещаем готовый файл из staging в OutputDir под защитой inFlight:
+		// сканер пропускает путь, пока он не окажется в БД.
+		finalPath := filepath.Join(p.cfg.YtDlpOutputDir, event.FileName)
+		p.inFlight.Add(finalPath)
+		if err := moveFile(event.Path, finalPath); err != nil {
+			p.inFlight.Remove(finalPath)
+			lastErr = fmt.Errorf("move %s: %w", event.FileName, err)
+			slog.Error("worker: move file from staging", "src", event.Path, "dst", finalPath, "err", err)
+			continue
+		}
+
+		info, err := os.Stat(finalPath)
 		if err != nil {
-			slog.Error("worker: stat file", "path", event.Path, "err", err)
+			p.inFlight.Remove(finalPath)
+			slog.Error("worker: stat file", "path", finalPath, "err", err)
 			continue
 		}
 
 		f := &model.File{
 			JobID: job.ID,
-			Path:  event.Path,
+			Path:  finalPath,
 			Name:  event.FileName,
 			Size:  info.Size(),
 		}
-		// Регистрируем путь до записи в БД — сканер не будет импортировать файл в этом окне.
-		p.inFlight.Add(event.Path)
 		if err := p.fileRepo.Create(ctx, f); err != nil {
-			p.inFlight.Remove(event.Path)
+			p.inFlight.Remove(finalPath)
 			slog.Error("worker: save file record", "err", err)
 			continue
 		}
 		// Путь теперь в БД — AllPaths его видит; убираем из inFlight.
-		p.inFlight.Remove(event.Path)
+		p.inFlight.Remove(finalPath)
 		slog.Info("worker: file saved", "name", f.Name, "id", f.ID)
 		fileCount++
 		if firstFile == nil {
@@ -250,12 +283,12 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 	}
 
 	// Если контекст отменён — пользователь нажал «Отменить».
+	// Незавершённые файлы лежат в jobStaging и удаляются defer-ом os.RemoveAll.
 	if jobCtx.Err() != nil {
 		job.Status = model.JobCancelled
 		if err := p.jobRepo.Update(ctx, job); err != nil {
 			slog.Error("worker: update job cancelled", "err", err)
 		}
-		cleanPartialFiles(p.cfg.YtDlpOutputDir)
 		slog.Info("worker: job cancelled", "id", job.ID)
 		return
 	}

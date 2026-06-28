@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/jessevdk/go-flags"
@@ -33,6 +34,8 @@ type Config struct {
 	YtDlpProxy        string `long:"yt-dlp-proxy" env:"YT_DLP_PROXY"`
 	YtDlpTimeout      int    `long:"yt-dlp-timeout" env:"YT_DLP_TIMEOUT" default:"300"`
 	YtDlpExtraArgs    string `long:"yt-dlp-extra-args" env:"YT_DLP_EXTRA_ARGS"`
+	// Каталог незавершённых загрузок (вне зоны сканирования). Пусто → <output>/.talmor-tmp.
+	YtDlpStagingDir   string `long:"yt-dlp-staging-dir" env:"YT_DLP_STAGING_DIR" default:""`
 
 	// Worker pool
 	WorkerCount int `long:"worker-count" env:"WORKER_COUNT" default:"2"`
@@ -58,6 +61,16 @@ func (c *Config) LinkBase() string {
 	base := strings.TrimRight(c.BaseURL, "/")
 	prefix := strings.TrimRight(c.BasePath, "/")
 	return base + prefix
+}
+
+// StagingDir — каталог для незавершённых загрузок, вне зоны работы DirScanner.
+// По умолчанию — поддиректория OutputDir с точкой в имени: сканер пропускает dot-каталоги,
+// а нахождение на том же ФС гарантирует атомарный rename готового файла в OutputDir.
+func (c *Config) StagingDir() string {
+	if c.YtDlpStagingDir != "" {
+		return c.YtDlpStagingDir
+	}
+	return filepath.Join(c.YtDlpOutputDir, ".talmor-tmp")
 }
 
 // ExtraArgsList возвращает YT_DLP_EXTRA_ARGS как слайс строк.
