@@ -302,7 +302,7 @@ func (r *sqliteJobRepo) DeleteChecking(ctx context.Context, id string) error {
 func (r *sqliteJobRepo) ResetFailed(ctx context.Context, id string) error {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE jobs SET status='pending', error='', retry_count=0, next_retry_at=NULL, first_failed_at=NULL, updated_at=?
-		 WHERE id=? AND status='failed'`,
+		 WHERE id=? AND status IN ('failed','retrying')`,
 		time.Now().UTC().Format(time.RFC3339Nano), id,
 	)
 	if err != nil {
@@ -310,7 +310,7 @@ func (r *sqliteJobRepo) ResetFailed(ctx context.Context, id string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("job %s not found or not failed", id)
+		return fmt.Errorf("job %s not found or not failed/retrying", id)
 	}
 	return nil
 }

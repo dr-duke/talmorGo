@@ -135,11 +135,18 @@ templ mediaRow(item *model.MediaItem) {
 			<!-- Основное контекстное действие -->
 			switch rowPrimary(item) {
 				case "cancel":
+					if item.Job.Status == model.JobRetrying {
+						<button
+							class="m3-icon-btn"
+							hx-post={ fmt.Sprintf("jobs/%s/retry", item.Job.ID) }
+							hx-swap="none"
+							title="Повторить сейчас"
+						><span class="m3-icon">replay</span></button>
+					}
 					<button
 						class="m3-icon-btn m3-icon-btn-danger"
 						hx-delete={ fmt.Sprintf("queue/%s", item.Job.ID) }
-						hx-target="#media-inner"
-						hx-swap="outerHTML"
+						hx-swap="none"
 						hx-confirm="Отменить задачу?"
 						title="Отменить"
 					><span class="m3-icon">cancel</span></button>
