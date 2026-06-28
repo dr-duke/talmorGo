@@ -44,6 +44,26 @@ templ SettingsPage(basePath string, siteName string, records []*model.CookieReco
 				</form>
 			</section>
 			@CookieDomainList(records)
+			<section class="settings-section">
+				<h2 class="settings-heading">Очистка</h2>
+				<p class="settings-hint">
+					Безвозвратно удаляет из базы данных и с диска все неудачные загрузки, скрытые задания
+					и записи потерянных файлов. Действие необратимо.
+				</p>
+				<div class="settings-actions">
+					<button
+						class="m3-btn m3-btn-danger"
+						hx-post="settings/cleanup"
+						hx-target="#cleanup-result"
+						hx-swap="innerHTML"
+						hx-confirm="Удалить все мёртвые записи? Это действие необратимо."
+					>
+						<span class="m3-icon">delete_sweep</span>
+						Очистить
+					</button>
+				</div>
+				<div id="cleanup-result"></div>
+			</section>
 		</div>
 	}
 }

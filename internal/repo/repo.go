@@ -34,6 +34,9 @@ type JobRepo interface {
 	Unhide(ctx context.Context, id string) error
 	// Purge безвозвратно удаляет job и все его файлы из БД (только для hidden jobs).
 	Purge(ctx context.Context, id string) error
+	// CleanupDead удаляет все failed и hidden задания вместе с файловыми записями из БД.
+	// Возвращает количество удалённых заданий.
+	CleanupDead(ctx context.Context) (int, error)
 	ResetFailed(ctx context.Context, id string) error
 	ResetStale(ctx context.Context) error
 	// Redownload сбрасывает задание в pending и очищает привязку к файлу.
@@ -56,6 +59,10 @@ type FileRepo interface {
 	ListDeleted(ctx context.Context) ([]*model.DeletedFile, error)
 	// AllPaths возвращает множество всех известных путей (включая удалённые) для сверки при сканировании.
 	AllPaths(ctx context.Context) (map[string]struct{}, error)
+	// PathsForCleanup возвращает пути файлов, принадлежащих failed/hidden заданиям (для удаления с диска).
+	PathsForCleanup(ctx context.Context) ([]string, error)
+	// PruneLost удаляет из БД записи файлов, помеченных как потерянные (lost_at IS NOT NULL).
+	PruneLost(ctx context.Context) (int, error)
 	Rename(ctx context.Context, id, newName, newPath string) error
 	Delete(ctx context.Context, id string) error
 	MarkLost(ctx context.Context, id string) error

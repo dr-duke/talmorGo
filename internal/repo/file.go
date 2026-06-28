@@ -163,6 +163,37 @@ func (r *sqliteFileRepo) MarkLost(ctx context.Context, id string) error {
 	return err
 }
 
+func (r *sqliteFileRepo) PathsForCleanup(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT f.path FROM files f
+		JOIN jobs j ON j.id = f.job_id
+		WHERE (j.hidden=1 OR j.status='failed')
+		  AND f.deleted_at IS NULL
+		  AND f.lost_at IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		paths = append(paths, p)
+	}
+	return paths, rows.Err()
+}
+
+func (r *sqliteFileRepo) PruneLost(ctx context.Context) (int, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM files WHERE lost_at IS NOT NULL`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func (r *sqliteFileRepo) MarkFound(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE files SET lost_at=NULL WHERE id=?`, id)

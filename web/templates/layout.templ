@@ -114,6 +114,10 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 					background: var(--m3-primary); color: var(--m3-on-primary);
 				}
 				.m3-btn-filled:hover { filter: brightness(1.08); }
+				.m3-btn-danger {
+					background: var(--m3-error); color: #fff;
+				}
+				.m3-btn-danger:hover { filter: brightness(1.1); }
 
 				/* ── Filter bar ── */
 				.filter-bar {
@@ -347,6 +351,7 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 				.settings-hint code { font-family: monospace; background: var(--m3-surface-var); padding: .1em .4em; border-radius: 4px; }
 				.settings-empty { font-size: .875rem; color: var(--m3-on-surface-var); }
 				.settings-actions { display: flex; gap: .75rem; margin-top: .75rem; }
+				.cleanup-result { font-size: .875rem; color: var(--m3-on-surface-var); margin-top: .75rem; }
 				.cookie-import-form { display: flex; flex-direction: column; }
 				.cookie-textarea {
 					width: 100%; box-sizing: border-box;

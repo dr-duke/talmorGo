@@ -48,7 +48,7 @@ func New(
 		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg, Expander: expander,
 	}
 	lh := &handler.LinkHandler{Tokens: tokens, Files: files}
-	sh := &handler.SettingsHandler{Cookies: cookies, Cfg: cfg, SiteName: siteName}
+	sh := &handler.SettingsHandler{Cookies: cookies, Jobs: jobs, Files: files, Storage: store, Cfg: cfg, SiteName: siteName}
 
 	// Статика.
 	staticSub, _ := fs.Sub(web.StaticFiles, "static")
@@ -88,6 +88,7 @@ func New(
 	mux.HandleFunc("GET /settings", sh.Page)
 	mux.HandleFunc("POST /settings/cookies/import", sh.Import)
 	mux.HandleFunc("DELETE /settings/cookies/{domain}", sh.DeleteDomain)
+	mux.HandleFunc("POST /settings/cleanup", sh.Cleanup)
 
 	// SSE: клиент подписывается на обновления.
 	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {

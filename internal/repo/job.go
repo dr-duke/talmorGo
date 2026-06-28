@@ -413,6 +413,30 @@ func (r *sqliteJobRepo) Purge(ctx context.Context, id string) error {
 	return err
 }
 
+func (r *sqliteJobRepo) CleanupDead(ctx context.Context) (int, error) {
+	// Удаляем файловые записи (presigned-токены удаляются каскадно через FK если настроен,
+	// либо остаются как orphan — безопасно, так как ссылки станут неразрешимыми).
+	if _, err := r.db.ExecContext(ctx, `
+		DELETE FROM files WHERE job_id IN (
+			SELECT id FROM jobs WHERE hidden=1 OR status='failed'
+		)`); err != nil {
+		return 0, err
+	}
+	// Удаляем привязки тегов.
+	if _, err := r.db.ExecContext(ctx, `
+		DELETE FROM tags_jobs WHERE job_id IN (
+			SELECT id FROM jobs WHERE hidden=1 OR status='failed'
+		)`); err != nil {
+		return 0, err
+	}
+	res, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE hidden=1 OR status='failed'`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func nullStr(s string) any {
 	if s == "" {
 		return nil

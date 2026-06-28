@@ -11,11 +11,15 @@ import (
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/dr-duke/talmorGo/web/templates"
 )
 
 type SettingsHandler struct {
 	Cookies  repo.CookieRepo
+	Jobs     repo.JobRepo
+	Files    repo.FileRepo
+	Storage  *storage.Storage
 	Cfg      *config.Config
 	SiteName string
 }
@@ -109,6 +113,37 @@ func (h *SettingsHandler) rewriteFile(ctx context.Context) error {
 		return os.Remove(path) // нет кук — файл не нужен (ошибка «не существует» ОК)
 	}
 	return os.WriteFile(path, []byte(merged), 0o600)
+}
+
+// Cleanup безвозвратно удаляет failed/hidden задания, их файлы с диска и из БД,
+// а также записи потерянных файлов (lost_at IS NOT NULL).
+func (h *SettingsHandler) Cleanup(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	paths, err := h.Files.PathsForCleanup(ctx)
+	if err != nil {
+		slog.Error("settings: cleanup paths", "err", err)
+	}
+	for _, p := range paths {
+		if delErr := h.Storage.Delete(p); delErr != nil {
+			slog.Warn("settings: cleanup delete file", "path", p, "err", delErr)
+		}
+	}
+
+	nJobs, err := h.Jobs.CleanupDead(ctx)
+	if err != nil {
+		slog.Error("settings: cleanup dead jobs", "err", err)
+	}
+
+	nFiles, err := h.Files.PruneLost(ctx)
+	if err != nil {
+		slog.Error("settings: prune lost files", "err", err)
+	}
+
+	msg := fmt.Sprintf("Удалено заданий: %d, файлов на диске: %d, записей потерянных файлов: %d",
+		nJobs, len(paths), nFiles)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<p class="cleanup-result">%s</p>`, msg)
 }
 
 // parseCookiesByDomain группирует строки Netscape-файла по домену (первая колонка).
