@@ -108,7 +108,13 @@ func newTestEnv(t *testing.T) *testEnv {
 		Tokens:  tokenRepo,
 		Tags:    tagRepo,
 		DataDir: tmpDir,
-		cleanup: func() { ts.Close(); database.Close() },
+		cleanup: func() {
+			// CloseClientConnections завершает SSE-соединения до Close(),
+			// иначе httptest.wg.Wait() блокирует навечно.
+			ts.CloseClientConnections()
+			ts.Close()
+			database.Close()
+		},
 	}
 }
 
