@@ -321,8 +321,12 @@ func TestRetryFailedJobChangesStatus(t *testing.T) {
 	ctx, cancel := newTab(t)
 	defer cancel()
 
+	// failed — архивный статус, скрыт с главной: ждём появления в DOM и раскрываем фильтром.
+	var revealed bool
 	err := chromedp.Run(ctx,
 		openMedia(env.URL),
+		chromedp.WaitReady(`.status-failed`, chromedp.ByQuery),
+		chromedp.Evaluate(`activateStatusFilter('failed'); true`, &revealed),
 		chromedp.WaitVisible(`.status-failed`, chromedp.ByQuery),
 		chromedp.Click(`[title="Повторить"]`, chromedp.ByQuery),
 		waitForSwap(),
@@ -497,7 +501,9 @@ func TestClickRowOpensPlayer(t *testing.T) {
 	err := chromedp.Run(ctx,
 		openMedia(env.URL),
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
-		chromedp.Click(`.status-done .media-info`, chromedp.ByQuery),
+		// Кликаем по заголовку (некликабельная зона строки), а не по .media-info,
+		// чей центр может попасть на чип-кнопку.
+		chromedp.Click(`.status-done .media-title`, chromedp.ByQuery),
 		chromedp.Sleep(300*time.Millisecond),
 	)
 	if err != nil {
@@ -564,7 +570,7 @@ func TestPlayerCloses(t *testing.T) {
 	err := chromedp.Run(ctx,
 		openMedia(env.URL),
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
-		chromedp.Click(`.status-done .media-info`, chromedp.ByQuery),
+		chromedp.Click(`.status-done .media-title`, chromedp.ByQuery),
 		chromedp.Sleep(300*time.Millisecond),
 		chromedp.Click(`.player-close`, chromedp.ByQuery),
 		chromedp.Sleep(200*time.Millisecond),
@@ -611,6 +617,12 @@ func TestDeletedFileAllowsRedownload(t *testing.T) {
 		&hasRedownload,
 	)); err != nil || !hasRedownload {
 		t.Fatal("redownload button not found on .status-deleted row")
+	}
+
+	// deleted — архивный статус, скрыт с главной: раскрываем фильтром перед кликом.
+	var revealed bool
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`activateStatusFilter('deleted'); true`, &revealed)); err != nil {
+		t.Fatalf("reveal deleted: %v", err)
 	}
 
 	// Шаг 2: нажать «Скачать повторно» — должен перейти в pending
@@ -800,6 +812,12 @@ func TestCancelledJobAllowsRedownload(t *testing.T) {
 		&hasRedownload,
 	)); err != nil || !hasRedownload {
 		t.Fatal("redownload button not found on .status-cancelled row")
+	}
+
+	// cancelled — архивный статус, скрыт с главной: раскрываем фильтром перед кликом.
+	var revealed bool
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`activateStatusFilter('cancelled'); true`, &revealed)); err != nil {
+		t.Fatalf("reveal cancelled: %v", err)
 	}
 
 	// Нажимаем — должен перейти в pending

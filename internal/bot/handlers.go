@@ -214,9 +214,9 @@ func (b *Bot) handleCallback(ctx context.Context, cq *tgbotapi.CallbackQuery) {
 		b.answerCallback(cq.ID, "Ссылка отправлена")
 
 	case strings.HasPrefix(data, "stop:"):
-		// Отмена задания (работает только для pending).
+		// Мягкая отмена: статус cancelled, URL сохраняется в БД.
 		jobID := strings.TrimPrefix(data, "stop:")
-		if err := b.jobs.Delete(ctx, jobID); err != nil {
+		if err := b.jobs.Cancel(ctx, jobID); err != nil {
 			b.answerCallback(cq.ID, "⚠️ Нельзя отменить — задание уже выполняется")
 			return
 		}

@@ -70,23 +70,13 @@ func (h *MediaHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, f.Path)
 }
 
-// Delete — мягкое удаление доступного файла.
-// Если файл уже deleted или missing — скрывает job (hidden=1).
+// Delete — мягкое удаление файла: файл уходит с диска, запись в БД (URL, название)
+// сохраняется со статусом deleted. Архивирование/скрытие — отдельная операция (Hide).
 func (h *MediaHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	f, err := h.Files.GetByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, "file not found", http.StatusNotFound)
-		return
-	}
-
-	if f.IsDeleted() || f.IsLost() {
-		// Повторное нажатие delete на deleted/missing → скрыть job.
-		if err := h.Jobs.Hide(r.Context(), f.JobID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		h.List(w, r)
 		return
 	}
 
@@ -119,10 +109,21 @@ func (h *MediaHandler) PurgeJob(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Hide скрывает job из основного интерфейса (только для hidden jobs в «скрытых»).
+// Hide убирает job из основного интерфейса (архив). Данные сохраняются.
 func (h *MediaHandler) Hide(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")
 	if err := h.Jobs.Hide(r.Context(), jobID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("HX-Trigger", "mediaRefresh")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Unhide возвращает скрытую запись на главную.
+func (h *MediaHandler) Unhide(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+	if err := h.Jobs.Unhide(r.Context(), jobID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -22,15 +22,16 @@ type JobRepo interface {
 	LastMedia(ctx context.Context, n int) ([]*model.MediaItem, error)
 	ClaimNext(ctx context.Context) (*model.Job, error)
 	Update(ctx context.Context, job *model.Job) error
-	// Cancel переводит pending/retrying задание в статус cancelled (мягкая отмена).
+	// Cancel переводит активное (checking/pending/retrying) задание в cancelled (мягкая отмена, URL сохраняется).
 	Cancel(ctx context.Context, id string) error
 	// ConfirmSingle переводит checking-задание в pending (URL оказался одиночным видео).
 	ConfirmSingle(ctx context.Context, id string) error
 	// DeleteChecking удаляет checking-задание (URL оказался плейлистом, создаём отдельные jobs).
 	DeleteChecking(ctx context.Context, id string) error
-	Delete(ctx context.Context, id string) error
-	// Hide скрывает запись из интерфейса (переход из deleted/missing по повторному нажатию delete).
+	// Hide убирает запись из основного интерфейса (архив), данные сохраняются.
 	Hide(ctx context.Context, id string) error
+	// Unhide возвращает скрытую запись на главную.
+	Unhide(ctx context.Context, id string) error
 	// Purge безвозвратно удаляет job и все его файлы из БД (только для hidden jobs).
 	Purge(ctx context.Context, id string) error
 	ResetFailed(ctx context.Context, id string) error

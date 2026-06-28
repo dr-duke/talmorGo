@@ -70,7 +70,7 @@ templ MediaList(items []*model.MediaItem, tags []*model.Tag) {
 
 templ mediaRow(item *model.MediaItem) {
 	<div
-		class={ "media-row", "status-" + item.EffectiveStatus(), templ.KV("is-hidden", item.Job.Hidden) }
+		class={ "media-row", "status-" + item.EffectiveStatus() }
 		data-title={ item.DisplayTitle() }
 		data-url={ item.Job.URL }
 		data-domain={ item.Job.Domain() }
@@ -194,7 +194,8 @@ templ mediaRow(item *model.MediaItem) {
 					title="Скачать повторно"
 				><span class="m3-icon">refresh</span></button>
 			}
-			if item.Job.Status == model.JobPending || item.Job.Status == model.JobRunning || item.Job.Status == model.JobRetrying {
+			<!-- Отмена активной задачи (checking/pending/running/retrying) → cancelled -->
+			if item.Job.Status == model.JobChecking || item.Job.Status == model.JobPending || item.Job.Status == model.JobRunning || item.Job.Status == model.JobRetrying {
 				<button
 					class="m3-icon-btn m3-icon-btn-danger"
 					hx-delete={ fmt.Sprintf("queue/%s", item.Job.ID) }
@@ -212,19 +213,26 @@ templ mediaRow(item *model.MediaItem) {
 					title="Повторить"
 				><span class="m3-icon">replay</span></button>
 			}
-			<!-- Удалить доступный файл → soft delete -->
+			<!-- Удалить доступный файл → soft delete (запись и URL сохраняются) -->
 			if item.File != nil && item.File.IsAvailable() {
 				<button
 					class="m3-icon-btn m3-icon-btn-danger"
 					hx-delete={ fmt.Sprintf("files/%s", item.File.ID) }
 					hx-target="#media-inner"
 					hx-swap="outerHTML"
-					hx-confirm={ fmt.Sprintf("Удалить %s?", item.DisplayTitle()) }
+					hx-confirm={ fmt.Sprintf("Удалить файл %s? Ссылка сохранится.", item.DisplayTitle()) }
 					title="Удалить файл"
 				><span class="m3-icon">delete</span></button>
 			}
-			<!-- Безвозвратное удаление скрытой записи -->
 			if item.Job.Hidden {
+				<!-- Вернуть скрытую запись на главную -->
+				<button
+					class="m3-icon-btn"
+					hx-post={ fmt.Sprintf("jobs/%s/unhide", item.Job.ID) }
+					hx-swap="none"
+					title="Вернуть на главную"
+				><span class="m3-icon">visibility</span></button>
+				<!-- Безвозвратное удаление скрытой записи -->
 				<button
 					class="m3-icon-btn m3-icon-btn-danger"
 					hx-delete={ fmt.Sprintf("jobs/%s", item.Job.ID) }
@@ -232,25 +240,13 @@ templ mediaRow(item *model.MediaItem) {
 					hx-confirm="Удалить навсегда? Восстановить будет невозможно."
 					title="Удалить навсегда"
 				><span class="m3-icon">delete_forever</span></button>
-			}
-			<!-- Скрыть отменённый джоб -->
-			if item.Job.Status == model.JobCancelled {
+			} else {
+				<!-- Архивировать (убрать с главной) любую запись; данные сохраняются -->
 				<button
 					class="m3-icon-btn m3-icon-btn-danger"
 					hx-post={ fmt.Sprintf("jobs/%s/hide", item.Job.ID) }
 					hx-swap="none"
-					hx-confirm="Скрыть запись?"
-					title="Скрыть"
-				><span class="m3-icon">visibility_off</span></button>
-			}
-			<!-- Удалить deleted/missing файл → скрыть запись -->
-			if item.File != nil && (item.File.IsDeleted() || item.File.IsLost()) {
-				<button
-					class="m3-icon-btn m3-icon-btn-danger"
-					hx-delete={ fmt.Sprintf("files/%s", item.File.ID) }
-					hx-target="#media-inner"
-					hx-swap="outerHTML"
-					hx-confirm="Скрыть запись?"
+					hx-confirm="Убрать с главной? Запись сохранится в «скрытых»."
 					title="Скрыть"
 				><span class="m3-icon">visibility_off</span></button>
 			}

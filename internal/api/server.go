@@ -66,6 +66,7 @@ func New(
 	mux.HandleFunc("POST /files/{id}/link", mh.CreateLink)
 	mux.HandleFunc("POST /jobs/{id}/redownload", mh.Redownload)
 	mux.HandleFunc("POST /jobs/{id}/hide", mh.Hide)
+	mux.HandleFunc("POST /jobs/{id}/unhide", mh.Unhide)
 	mux.HandleFunc("DELETE /jobs/{id}", mh.PurgeJob)
 	mux.HandleFunc("POST /jobs/{id}/tags", mh.AddTag)
 	mux.HandleFunc("DELETE /jobs/{id}/tags/{tag}", mh.RemoveTag)

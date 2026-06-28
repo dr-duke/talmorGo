@@ -268,11 +268,12 @@ func (r *sqliteJobRepo) Update(ctx context.Context, job *model.Job) error {
 	return err
 }
 
-// Cancel переводит pending или retrying задание в статус cancelled (мягкая отмена без удаления из БД).
-// Для running заданий отмена происходит через worker.Pool.CancelJob — он сам проставит статус.
+// Cancel переводит активное задание (checking/pending/retrying) в статус cancelled
+// без удаления из БД — URL и история сохраняются. Для running заданий отмена идёт
+// через worker.Pool.CancelJob, который сам проставит статус.
 func (r *sqliteJobRepo) Cancel(ctx context.Context, id string) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE jobs SET status='cancelled', next_retry_at=NULL, updated_at=? WHERE id=? AND status IN ('pending','retrying')`,
+		`UPDATE jobs SET status='cancelled', next_retry_at=NULL, updated_at=? WHERE id=? AND status IN ('checking','pending','retrying')`,
 		time.Now().UTC().Format(time.RFC3339Nano), id,
 	)
 	if err != nil {
@@ -296,18 +297,6 @@ func (r *sqliteJobRepo) ConfirmSingle(ctx context.Context, id string) error {
 func (r *sqliteJobRepo) DeleteChecking(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id=? AND status='checking'`, id)
 	return err
-}
-
-func (r *sqliteJobRepo) Delete(ctx context.Context, id string) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id=? AND status='pending'`, id)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("job %s not found or not pending", id)
-	}
-	return nil
 }
 
 func (r *sqliteJobRepo) ResetFailed(ctx context.Context, id string) error {
@@ -342,6 +331,15 @@ func (r *sqliteJobRepo) Redownload(ctx context.Context, id string) error {
 func (r *sqliteJobRepo) Hide(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE jobs SET hidden=1, updated_at=? WHERE id=?`,
+		time.Now().UTC().Format(time.RFC3339Nano), id,
+	)
+	return err
+}
+
+// Unhide возвращает скрытую запись на главную (снимает флаг hidden).
+func (r *sqliteJobRepo) Unhide(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE jobs SET hidden=0, updated_at=? WHERE id=?`,
 		time.Now().UTC().Format(time.RFC3339Nano), id,
 	)
 	return err

@@ -173,9 +173,6 @@ templ Layout(title string, basePath string) {
 				.m3-chip-status { cursor: pointer; }
 				.m3-chip-status:hover { filter: brightness(1.2); }
 
-				/* Скрытые строки скрыты по умолчанию; JS-фильтр управляет видимостью */
-				.media-row.is-hidden { display: none; }
-
 				/* Чип «скрытые» в фильтре — особый вид */
 				.m3-chip-hidden { border: 1px dashed var(--m3-outline); }
 
@@ -558,20 +555,25 @@ templ Layout(title string, basePath string) {
 					});
 				}
 
+				// Статусы, которые не показываются на главной по умолчанию (не захламляют),
+				// но доступны кликом по соответствующему чипу статуса.
+				var _archivedStatus = {failed:1, cancelled:1, deleted:1, missing:1, hidden:1};
+
 				function applyFilters() {
 					var q = (document.getElementById('media-search') || {value:''}).value.toLowerCase();
-					var showHidden = _activeTag === 'hidden';
 					document.querySelectorAll('.media-row').forEach(function(row) {
-						var isHiddenRow = row.classList.contains('is-hidden');
-						// Режим «скрытые»: показываем только скрытые строки.
-						if (showHidden) { row.style.display = isHiddenRow ? '' : 'none'; return; }
-						// Обычный режим: скрытые строки не видны.
-						if (isHiddenRow) { row.style.display = 'none'; return; }
-
 						var text = (row.dataset.title + ' ' + row.dataset.url + ' ' + row.dataset.domain).toLowerCase();
 						var tags = (row.dataset.tags || '').split(',');
+						var status = tags[0];
 						var matchSearch = !q || text.includes(q) || tags.some(function(t){ return t.toLowerCase().includes(q); });
-						var matchTag = !_activeTag || tags.indexOf(_activeTag) >= 0;
+
+						if (!_activeTag) {
+							// Главная: прячем архивные статусы (ошибки, отменённые, удалённые, скрытые).
+							row.style.display = (!_archivedStatus[status] && matchSearch) ? '' : 'none';
+							return;
+						}
+						// Активен фильтр (чип статуса или пользовательский тег): показываем совпадения.
+						var matchTag = tags.indexOf(_activeTag) >= 0;
 						row.style.display = (matchSearch && matchTag) ? '' : 'none';
 					});
 				}
