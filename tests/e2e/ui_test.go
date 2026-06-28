@@ -176,6 +176,14 @@ func waitForSwap() chromedp.Action {
 	return chromedp.Sleep(600 * time.Millisecond)
 }
 
+// openRowMenu открывает меню «⋮» в первой строке (вторичные действия живут там).
+func openRowMenu() chromedp.Action {
+	return chromedp.Tasks{
+		chromedp.Click(`[title="Ещё"]`, chromedp.ByQuery),
+		chromedp.Sleep(150 * time.Millisecond),
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -360,6 +368,7 @@ func TestDeleteFileUpdatesRow(t *testing.T) {
 		openMedia(env.URL),
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
 		autoConfirm,
+		openRowMenu(),
 		chromedp.Click(`[title="Удалить файл"]`, chromedp.ByQuery),
 		waitForSwap(),
 	)
@@ -397,6 +406,7 @@ func TestRedownloadSetsPending(t *testing.T) {
 		openMedia(env.URL),
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
 		autoConfirm,
+		openRowMenu(),
 		chromedp.Click(`[title="Скачать повторно"]`, chromedp.ByQuery),
 		waitForSwap(),
 	)
@@ -434,6 +444,7 @@ func TestLogDialogOpensWithContent(t *testing.T) {
 	err := chromedp.Run(ctx,
 		openMedia(env.URL),
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
+		openRowMenu(),
 		chromedp.Click(`[onclick*="openLog"]`, chromedp.ByQuery),
 		chromedp.Sleep(500*time.Millisecond),
 	)
@@ -471,6 +482,7 @@ func TestLogDialogCloses(t *testing.T) {
 	err := chromedp.Run(ctx,
 		openMedia(env.URL),
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
+		openRowMenu(),
 		chromedp.Click(`[onclick*="openLog"]`, chromedp.ByQuery),
 		chromedp.Sleep(300*time.Millisecond),
 		chromedp.Click(`#log-dialog .player-close`, chromedp.ByQuery),
@@ -603,6 +615,7 @@ func TestDeletedFileAllowsRedownload(t *testing.T) {
 		openMedia(env.URL),
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
 		autoConfirm,
+		openRowMenu(),
 		chromedp.Click(`[title="Удалить файл"]`, chromedp.ByQuery),
 		waitForSwap(),
 	)
@@ -724,6 +737,7 @@ func TestRenameFileUpdatesTitle(t *testing.T) {
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
 		// mock window.prompt — renamePrompt() вызывает prompt('Новое имя:', name)
 		chromedp.Evaluate(`window.prompt = function() { return "Renamed Video.mp4"; }`, nil),
+		openRowMenu(),
 		chromedp.Click(`[title="Переименовать"]`, chromedp.ByQuery),
 		waitForSwap(),
 	)

@@ -40,17 +40,12 @@ templ Layout(title string, basePath string) {
 					--m3-on-error:    #690005;
 					--m3-scrim:       rgba(0,0,0,0.6);
 
-					/* status colors */
-					--c-checking:  #2a3a5a;
-					--c-pending:   #4a5568;
-					--c-running:   #276749;
-					--c-retrying:  #7a5c1a;
-					--c-done:      #1a4731;
-					--c-failed:    #7a1f1f;
-					--c-missing:   #5c3d1a;
-					--c-deleted:   #3a3a3a;
-					--c-cancelled: #4a3a4a;
-					--c-imported:  #1a3a4a;
+					/* Статусы — 4 семантические группы (bg + текст) */
+					--c-active:    #2a3a5a; --c-active-fg:  #90aad0; /* checking/pending/running */
+					--c-success:   #1a4731; --c-success-fg: #68d391; /* done/imported */
+					--c-warn:      #5c3d1a; --c-warn-fg:    #f6ad55; /* retrying/missing */
+					--c-error:     #4a2a30; --c-error-fg:   #fc8181; /* failed/cancelled/deleted */
+					--c-neutral:   #2e2e3a; --c-neutral-fg: #8a8a96; /* hidden */
 				}
 
 				html, body { height: 100%; background: var(--m3-bg); color: var(--m3-on-surface); }
@@ -156,18 +151,22 @@ templ Layout(title string, basePath string) {
 				}
 				.chip-remove:hover { opacity: 1; }
 
-				/* ── Status badge colours (shared by chips и строками) ── */
-				.badge-checking  { background: var(--c-checking);  color: #90aad0; }
-				.badge-pending   { background: var(--c-pending);   color: #a0aec0; }
-				.badge-running   { background: var(--c-running);   color: #68d391; }
-				.badge-retrying  { background: var(--c-retrying);  color: #f6ad55; }
-				.badge-done      { background: var(--c-done);      color: #68d391; }
-				.badge-failed    { background: var(--c-failed);    color: #fc8181; }
-				.badge-missing   { background: var(--c-missing);   color: #f6ad55; }
-				.badge-deleted   { background: var(--c-deleted);   color: #718096; }
-				.badge-cancelled { background: var(--c-cancelled); color: #c9a8e0; }
-				.badge-hidden    { background: var(--m3-surface-var); color: var(--m3-outline); }
-				.badge-imported  { background: var(--c-imported);   color: #63b3ed; }
+				/* ── Status badge colours — 4 семантические группы ── */
+				.badge-checking, .badge-pending, .badge-running {
+					background: var(--c-active);  color: var(--c-active-fg);
+				}
+				.badge-done, .badge-imported {
+					background: var(--c-success); color: var(--c-success-fg);
+				}
+				.badge-retrying, .badge-missing {
+					background: var(--c-warn);    color: var(--c-warn-fg);
+				}
+				.badge-failed, .badge-cancelled, .badge-deleted {
+					background: var(--c-error);   color: var(--c-error-fg);
+				}
+				.badge-hidden {
+					background: var(--c-neutral); color: var(--c-neutral-fg);
+				}
 
 				/* Статус-чип в строке — курсор pointer, hover чуть ярче */
 				.m3-chip-status { cursor: pointer; }
@@ -182,7 +181,7 @@ templ Layout(title string, basePath string) {
 				}
 				.media-row {
 					display: grid;
-					grid-template-columns: 80px 1fr auto;
+					grid-template-columns: 1fr auto;
 					gap: .75rem; align-items: center;
 					background: var(--m3-surface);
 					border: 1px solid var(--m3-outline-var);
@@ -191,39 +190,58 @@ templ Layout(title string, basePath string) {
 					transition: background .15s;
 				}
 				.media-row:hover { background: var(--m3-surface-var); }
-				.media-row.status-running  { border-left: 3px solid #68d391; }
-				.media-row.status-retrying { border-left: 3px solid #f6ad55; }
-				.media-row.status-failed   { border-left: 3px solid #fc8181; }
-				.media-row.status-lost     { border-left: 3px solid #f6ad55; opacity: .8; }
-
-				/* Source column */
-				.media-source {
-					display: flex; flex-direction: column;
-					align-items: center; gap: .3rem;
-					color: var(--m3-on-surface-var); font-size: .7rem;
-					text-align: center;
-				}
-				.favicon { border-radius: 3px; }
-				.domain-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 72px; }
+				.media-row.status-running  { border-left: 3px solid var(--c-active-fg); }
+				.media-row.status-retrying { border-left: 3px solid var(--c-warn-fg); }
+				.media-row.status-failed   { border-left: 3px solid var(--c-error-fg); }
+				.media-row.status-missing  { border-left: 3px solid var(--c-warn-fg); opacity: .85; }
 
 				/* Info column */
-				.media-info { min-width: 0; }
+				.media-main { min-width: 0; }
+				.favicon { border-radius: 3px; flex-shrink: 0; }
 				.media-title {
+					display: flex; align-items: center; gap: .4rem; min-width: 0;
 					font-size: .9rem; font-weight: 500; color: var(--m3-on-surface);
-					overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 					margin-bottom: .3rem;
 				}
+				.title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 				.media-meta {
 					display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
 				}
+				.domain-label { font-size: .75rem; color: var(--m3-on-surface-var); }
 				.meta-size { font-size: .75rem; color: var(--m3-on-surface-var); }
-				.meta-retry { font-size: .72rem; color: #f6ad55; }
+				.meta-retry { font-size: .72rem; color: var(--c-warn-fg); }
 				.tag-chips { display: flex; flex-wrap: wrap; gap: .25rem; align-items: center; }
 
 				/* Actions column */
 				.media-actions {
 					display: flex; gap: .2rem; align-items: center; flex-shrink: 0;
 				}
+
+				/* Row overflow menu */
+				.row-menu-wrap { position: relative; }
+				.row-menu {
+					position: absolute; right: 0; top: calc(100% + 4px);
+					display: none; flex-direction: column;
+					min-width: 210px; padding: .35rem; z-index: 30;
+					background: var(--m3-surface-hi);
+					border: 1px solid var(--m3-outline-var);
+					border-radius: 12px;
+					box-shadow: 0 8px 28px rgba(0,0,0,.55);
+				}
+				.row-menu.open { display: flex; }
+				.row-menu-item {
+					display: flex; align-items: center; gap: .65rem;
+					width: 100%; padding: .5rem .6rem;
+					background: transparent; border: none; border-radius: 8px;
+					color: var(--m3-on-surface); font-size: .85rem;
+					text-align: left; text-decoration: none; white-space: nowrap;
+					cursor: pointer;
+				}
+				.row-menu-item:hover { background: var(--m3-surface-var); }
+				.row-menu-item .m3-icon { font-size: 18px; color: var(--m3-on-surface-var); }
+				.row-menu-item.danger { color: var(--m3-error); }
+				.row-menu-item.danger .m3-icon { color: var(--m3-error); }
+				.row-menu-divider { height: 1px; background: var(--m3-outline-var); margin: .25rem .3rem; }
 
 				/* ── M3 Icon Button ── */
 				.m3-icon-btn {
@@ -507,6 +525,20 @@ templ Layout(title string, basePath string) {
 				function copyOriginalURL(url) {
 					navigator.clipboard.writeText(url);
 				}
+
+				// ── Row overflow menu ──
+				function closeAllRowMenus() {
+					document.querySelectorAll('.row-menu.open').forEach(function(m){ m.classList.remove('open'); });
+				}
+				function toggleRowMenu(ev, btn) {
+					ev.stopPropagation();
+					var menu = btn.parentElement.querySelector('.row-menu');
+					var wasOpen = menu.classList.contains('open');
+					closeAllRowMenus();
+					if (!wasOpen) menu.classList.add('open');
+				}
+				// Клик вне меню закрывает его.
+				document.addEventListener('click', closeAllRowMenus);
 
 				// ── Tags ──
 				function addTag(jobID) {
