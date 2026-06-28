@@ -101,11 +101,6 @@ func (h *QueueHandler) tryExpandPlaylist(placeholderID, rawURL string, opts down
 	h.Pool.Enqueue()
 }
 
-// createPlaylistJobs используется Telegram-ботом (синхронно, с контекстом запроса).
-func (h *QueueHandler) createPlaylistJobs(r *http.Request, info *downloader.PlaylistInfo, source string, chatID int64) {
-	h.doCreatePlaylistJobs(r.Context(), info, source, chatID)
-}
-
 // doCreatePlaylistJobs создаёт отдельные job'ы для каждого видео из плейлиста
 // и назначает тег с названием плейлиста.
 func (h *QueueHandler) doCreatePlaylistJobs(ctx context.Context, info *downloader.PlaylistInfo, source string, chatID int64) {

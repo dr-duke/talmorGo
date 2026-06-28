@@ -48,7 +48,6 @@ type JobRepo interface {
 type FileRepo interface {
 	Create(ctx context.Context, f *model.File) error
 	GetByID(ctx context.Context, id string) (*model.File, error)
-	List(ctx context.Context) ([]*model.File, error)
 	ListAll(ctx context.Context) ([]*model.File, error) // включая удалённые/потерянные
 	ListByJobID(ctx context.Context, jobID string) ([]*model.File, error)
 	// DeleteAllByJobID полностью удаляет все файлы задания из БД (используется при redownload).

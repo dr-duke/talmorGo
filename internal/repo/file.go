@@ -55,17 +55,6 @@ func (r *sqliteFileRepo) GetByID(ctx context.Context, id string) (*model.File, e
 	return scanFile(row)
 }
 
-func (r *sqliteFileRepo) List(ctx context.Context) ([]*model.File, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, COALESCE(job_id,''), path, name, size, created_at, deleted_at, lost_at
-		 FROM files WHERE deleted_at IS NULL ORDER BY created_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanFiles(rows)
-}
-
 // ListAll возвращает все файлы (включая удалённые/потерянные) для проверки файловой системы.
 func (r *sqliteFileRepo) ListAll(ctx context.Context) ([]*model.File, error) {
 	rows, err := r.db.QueryContext(ctx,

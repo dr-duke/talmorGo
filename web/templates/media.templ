@@ -315,3 +315,16 @@ func retryIn(t *time.Time) string {
 	}
 	return fmt.Sprintf("через %dm", int(d.Minutes()))
 }
+
+func formatSize(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(b)/(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(b)/(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.0f KB", float64(b)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}

@@ -116,7 +116,7 @@ func TestFileRepo_CRUD(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	list, err := r.List(ctx)
+	list, err := r.ListAll(ctx)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -135,10 +135,10 @@ func TestFileRepo_CRUD(t *testing.T) {
 	if err := r.Delete(ctx, f.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	// После soft delete файл не должен появляться в List.
-	list2, _ := r.List(ctx)
-	if len(list2) != 0 {
-		t.Errorf("expected empty list after delete")
+	// После soft delete запись остаётся, но помечена удалённой.
+	got, _ = r.GetByID(ctx, f.ID)
+	if got.IsAvailable() {
+		t.Errorf("expected file to be unavailable after soft delete")
 	}
 }
 
