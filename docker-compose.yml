@@ -6,7 +6,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - /path/to/jellyfin/media:/data
+      - /path/to/media:/data
     environment:
       # Обязательные
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"

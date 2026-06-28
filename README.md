@@ -4,7 +4,7 @@
 
 <h1 align="center">TalmorGo</h1>
 
-<p align="center">Telegram-бот и веб-интерфейс для скачивания видео через <a href="https://github.com/yt-dlp/yt-dlp">yt-dlp</a> с хранением в библиотеке Jellyfin.</p>
+<p align="center">Telegram-бот и веб-интерфейс для скачивания видео через <a href="https://github.com/yt-dlp/yt-dlp">yt-dlp</a> с хранением на локальном диске.</p>
 
 ---
 
