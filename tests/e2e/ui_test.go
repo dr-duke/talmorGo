@@ -96,7 +96,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	tagRepo := repo.NewTagRepo(database)
 	cookieRepo := repo.NewCookieRepo(database)
 
-	cfg := &config.Config{BaseURL: "", BasePath: ""}
+	cfg := &config.Config{BaseURL: "", BasePath: "", SiteName: "TalmorGo"}
 	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, storage.New(tmpDir), &fakePool{})
 	ts := httptest.NewServer(srv.Handler())
 
@@ -485,7 +485,7 @@ func TestLogDialogCloses(t *testing.T) {
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
 		openRowMenu(),
 		chromedp.Click(`[onclick*="openLog"]`, chromedp.ByQuery),
-		chromedp.Sleep(300*time.Millisecond),
+		chromedp.WaitVisible(`#log-dialog[open]`, chromedp.ByQuery),
 		chromedp.Click(`#log-dialog .player-close`, chromedp.ByQuery),
 		chromedp.Sleep(200*time.Millisecond),
 	)
