@@ -30,6 +30,7 @@ func New(
 	pool handler.Enqueuer,
 ) *Server {
 	basePath := strings.TrimRight(cfg.BasePath, "/")
+	siteName := cfg.SiteName
 
 	mux := http.NewServeMux()
 
@@ -53,7 +54,7 @@ func New(
 			http.NotFound(w, r)
 			return
 		}
-		templ.Handler(templates.Index(basePath)).ServeHTTP(w, r)
+		templ.Handler(templates.Index(basePath, siteName)).ServeHTTP(w, r)
 	})
 
 	// Медиатека — объединённый список (заменяет /queue + /files).

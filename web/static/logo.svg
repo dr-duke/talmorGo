@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="TalmorGo">
+  <defs>
+    <linearGradient id="tg-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#cac0ff"/>
+      <stop offset="1" stop-color="#8b74ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#tg-grad)"/>
+  <g fill="#2d1f63">
+    <!-- стержень стрелки -->
+    <rect x="28" y="15" width="8" height="17" rx="4"/>
+    <!-- наконечник: треугольник вниз = download / play -->
+    <path d="M19 29 L45 29 L32 47 Z"/>
+    <!-- полка-библиотека -->
+    <rect x="18" y="51" width="28" height="6" rx="3"/>
+  </g>
+</svg>

@@ -1,7 +1,7 @@
 package templates
 
-templ Index(basePath string) {
-	@Layout("Медиатека", basePath) {
+templ Index(basePath string, siteName string) {
+	@Layout("Медиатека", basePath, siteName) {
 		<div
 			id="content"
 			hx-get="media"

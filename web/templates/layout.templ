@@ -7,14 +7,15 @@ func baseHref(basePath string) string {
 	return basePath + "/"
 }
 
-templ Layout(title string, basePath string) {
+templ Layout(title string, basePath string, siteName string) {
 	<!DOCTYPE html>
 	<html lang="ru">
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-			<title>{ title } — TalmorGo</title>
+			<title>{ title } — { siteName }</title>
 			<base href={ baseHref(basePath) }/>
+			<link rel="icon" type="image/svg+xml" href="static/logo.svg"/>
 			<!-- Google Material Symbols -->
 			<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block"/>
 			<link rel="stylesheet" href="static/plyr.min.css"/>
@@ -79,7 +80,8 @@ templ Layout(title string, basePath string) {
 					background: var(--m3-surface);
 					position: sticky; top: 0; z-index: 20;
 				}
-				.logo { font-size: 1.1rem; font-weight: 600; color: var(--m3-primary); }
+				.logo-mark { display: block; flex-shrink: 0; }
+				.logo { font-size: 1.1rem; font-weight: 600; color: var(--m3-primary); letter-spacing: .01em; }
 
 				/* ── Content ── */
 				#content { padding: 1rem 1.25rem; max-width: 1100px; margin: 0 auto; }
@@ -340,12 +342,11 @@ templ Layout(title string, basePath string) {
 					header { padding: .75rem; }
 					#content { padding: .75rem; }
 					.media-row {
-						grid-template-columns: 56px 1fr;
-						grid-template-rows: auto auto;
+						grid-template-columns: 1fr auto;
 					}
-					.media-actions {
-						grid-column: 1 / -1;
-						flex-wrap: wrap;
+					.title-text {
+						white-space: normal;
+						word-break: break-word;
 					}
 					.m3-icon-btn { width: 32px; height: 32px; }
 					.m3-icon { font-size: 18px; }
@@ -354,8 +355,8 @@ templ Layout(title string, basePath string) {
 		</head>
 		<body>
 			<header>
-				<span class="m3-icon" style="color:var(--m3-primary);font-size:24px;font-variation-settings:'FILL' 1">movie</span>
-				<span class="logo">TalmorGo</span>
+				<img class="logo-mark" src="static/logo.svg" width="28" height="28" alt=""/>
+				<span class="logo">{ siteName }</span>
 			</header>
 			<main>
 				{ children... }
@@ -468,14 +469,19 @@ templ Layout(title string, basePath string) {
 					document.getElementById('player-dialog').showModal();
 					plyrInstance.play();
 				}
-				function closePlayer() {
-					// PiP активен — не паузим, видео продолжает играть в мини-окне
+				function _playerInPiP() {
 					var video = document.getElementById('plyr-video');
-					var inPiP = document.pictureInPictureElement === video ||
-					            video.webkitPresentationMode === 'picture-in-picture';
-					if (!inPiP) plyrInstance.pause();
+					return document.pictureInPictureElement === video ||
+					       (video.webkitPresentationMode === 'picture-in-picture');
+				}
+				function closePlayer() {
+					if (!_playerInPiP()) plyrInstance.pause();
 					document.getElementById('player-dialog').close();
 				}
+				// Безопасная пауза при любом способе закрытия (ESC, backdrop, кнопка)
+				document.getElementById('player-dialog').addEventListener('close', function() {
+					if (!_playerInPiP()) plyrInstance.pause();
+				});
 				document.getElementById('player-dialog').addEventListener('click', function(e) {
 					if (e.target === this) closePlayer();
 				});

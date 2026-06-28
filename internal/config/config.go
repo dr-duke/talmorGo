@@ -15,6 +15,7 @@ type Config struct {
 	HTTPPort       string `long:"http-port" env:"HTTP_PORT" default:"8080"`
 	HTTPHost       string `long:"http-host" env:"HTTP_HOST" default:""`
 	BaseURL        string `long:"base-url" env:"BASE_URL"`
+	SiteName       string `long:"site-name" env:"SITE_NAME" default:"TalmorGo"`
 	// BasePath — префикс пути, если приложение смонтировано не в корне (напр. /talmor).
 	// Ingress передаёт запросы с полным путём; приложение само снимает префикс.
 	BasePath       string `long:"base-path" env:"BASE_PATH" default:""`
