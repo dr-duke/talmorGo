@@ -509,18 +509,22 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 					plyrInstance.play();
 				}
 				function _playerInPiP() {
-					var video = document.getElementById('plyr-video');
-					return document.pictureInPictureElement === video ||
-					       (video.webkitPresentationMode === 'picture-in-picture');
+					var v = document.querySelector('#player-dialog video');
+					if (!v) return false;
+					return document.pictureInPictureElement === v ||
+					       v.webkitPresentationMode === 'picture-in-picture';
 				}
+				// Вся логика паузы — только здесь: ESC, backdrop, кнопка — все пути
+				document.getElementById('player-dialog').addEventListener('close', function() {
+					if (_playerInPiP()) return;
+					try { plyrInstance.pause(); } catch(e) {}
+					// Прямая пауза на DOM-элементе как надёжный fallback
+					var v = document.querySelector('#player-dialog video');
+					if (v && !v.paused) v.pause();
+				});
 				function closePlayer() {
-					if (!_playerInPiP()) plyrInstance.pause();
 					document.getElementById('player-dialog').close();
 				}
-				// Безопасная пауза при любом способе закрытия (ESC, backdrop, кнопка)
-				document.getElementById('player-dialog').addEventListener('close', function() {
-					if (!_playerInPiP()) plyrInstance.pause();
-				});
 				document.getElementById('player-dialog').addEventListener('click', function(e) {
 					if (e.target === this) closePlayer();
 				});
