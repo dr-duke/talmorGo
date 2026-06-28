@@ -168,35 +168,10 @@ func (b *Bot) handleURL(ctx context.Context, msg *tgbotapi.Message) {
 	}
 }
 
-// createPlaylistJobs создаёт job'ы для каждого видео из плейлиста,
-// назначает тег с названием плейлиста и отправляет сводное сообщение.
+// createPlaylistJobs разворачивает плейлист в отдельные задания (через общий Expander)
+// и отправляет одно сводное сообщение. Возвращает число созданных заданий.
 func (b *Bot) createPlaylistJobs(ctx context.Context, chatID int64, originalURL string, info *downloader.PlaylistInfo) int {
-	var tagID string
-	if info.PlaylistTitle != "" && b.tags != nil {
-		if tag, err := b.tags.Upsert(ctx, info.PlaylistTitle); err == nil {
-			tagID = tag.ID
-		}
-	}
-
-	created := 0
-	for _, entry := range info.Entries {
-		job := &model.Job{
-			URL:    entry.URL,
-			Title:  entry.Title,
-			Status: model.JobPending,
-			Source: "telegram",
-			ChatID: chatID,
-		}
-		if err := b.jobs.Create(ctx, job); err != nil {
-			slog.Error("bot: create playlist job", "url", entry.URL, "err", err)
-			continue
-		}
-		if tagID != "" && b.tags != nil {
-			b.tags.AddToJob(ctx, job.ID, tagID) //nolint:errcheck
-		}
-		created++
-	}
-
+	created := b.expander.CreateJobs(ctx, info, "telegram", chatID)
 	if created == 0 {
 		return 0
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/api/handler"
 	"github.com/dr-duke/talmorGo/internal/config"
+	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/dr-duke/talmorGo/web"
@@ -32,11 +33,13 @@ func New(
 
 	mux := http.NewServeMux()
 
-	qh := &handler.QueueHandler{Jobs: jobs, Tags: tags, Pool: pool, Cfg: cfg}
+	expander := playlist.New(jobs, tags)
+
+	qh := &handler.QueueHandler{Jobs: jobs, Tags: tags, Pool: pool, Cfg: cfg, Expander: expander}
 	mh := &handler.MediaHandler{
 		Jobs: jobs, Files: files, Tags: tags,
 		Tokens: tokens, Storage: store,
-		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg,
+		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg, Expander: expander,
 	}
 	lh := &handler.LinkHandler{Tokens: tokens, Files: files}
 

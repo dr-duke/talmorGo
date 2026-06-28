@@ -11,6 +11,7 @@ import (
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/downloader"
 	"github.com/dr-duke/talmorGo/internal/model"
+	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
 )
 
@@ -21,10 +22,11 @@ type Enqueuer interface {
 }
 
 type QueueHandler struct {
-	Jobs repo.JobRepo
-	Tags repo.TagRepo
-	Pool Enqueuer
-	Cfg  *config.Config
+	Jobs     repo.JobRepo
+	Tags     repo.TagRepo
+	Pool     Enqueuer
+	Cfg      *config.Config
+	Expander *playlist.Expander
 }
 
 // Add добавляет URL в очередь немедленно, не блокируя ответ.
@@ -74,59 +76,11 @@ func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 		MaxFiles: h.Cfg.YtDlpMaxFilesPerRequest,
 		Timeout:  time.Duration(h.Cfg.YtDlpTimeout) * time.Second,
 	}
-	go h.tryExpandPlaylist(job.ID, rawURL, opts, "web", 0)
-}
-
-// tryExpandPlaylist проверяет URL на плейлист асинхронно.
-// Placeholder создан в статусе "checking" — воркер его не трогает.
-// Если одиночное видео: переводим в pending. Если плейлист: удаляем placeholder, создаём отдельные jobs.
-func (h *QueueHandler) tryExpandPlaylist(placeholderID, rawURL string, opts downloader.Options, source string, chatID int64) {
-	ctx := context.Background()
-	info := downloader.FetchPlaylist(ctx, rawURL, opts)
-	if info == nil {
-		// Одиночное видео — переводим checking → pending, даём воркеру сигнал.
-		if err := h.Jobs.ConfirmSingle(ctx, placeholderID); err != nil {
-			slog.Error("queue: confirm single", "id", placeholderID, "err", err)
-			return
-		}
+	// Асинхронно проверяем плейлист и сигналим воркеру; placeholder в статусе checking.
+	go func(id string) {
+		h.Expander.ResolvePlaceholder(context.Background(), id, rawURL, opts, "web", 0)
 		h.Pool.Enqueue()
-		return
-	}
-
-	// Плейлист: удаляем placeholder и создаём индивидуальные jobs.
-	if err := h.Jobs.DeleteChecking(ctx, placeholderID); err != nil {
-		slog.Error("queue: delete checking placeholder", "id", placeholderID, "err", err)
-	}
-	h.doCreatePlaylistJobs(ctx, info, source, chatID)
-	h.Pool.Enqueue()
-}
-
-// doCreatePlaylistJobs создаёт отдельные job'ы для каждого видео из плейлиста
-// и назначает тег с названием плейлиста.
-func (h *QueueHandler) doCreatePlaylistJobs(ctx context.Context, info *downloader.PlaylistInfo, source string, chatID int64) {
-	var tagID string
-	if info.PlaylistTitle != "" && h.Tags != nil {
-		if tag, err := h.Tags.Upsert(ctx, info.PlaylistTitle); err == nil {
-			tagID = tag.ID
-		}
-	}
-
-	for _, entry := range info.Entries {
-		job := &model.Job{
-			URL:    entry.URL,
-			Title:  entry.Title,
-			Status: model.JobPending,
-			Source: source,
-			ChatID: chatID,
-		}
-		if err := h.Jobs.Create(ctx, job); err != nil {
-			slog.Error("queue: create playlist job", "url", entry.URL, "err", err)
-			continue
-		}
-		if tagID != "" {
-			h.Tags.AddToJob(ctx, job.ID, tagID) //nolint:errcheck
-		}
-	}
+	}(job.ID)
 }
 
 // Delete отменяет задачу в любом статусе:

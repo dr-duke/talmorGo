@@ -11,6 +11,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/downloader"
+	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/dr-duke/talmorGo/web/templates"
@@ -18,14 +19,15 @@ import (
 
 // MediaHandler обслуживает объединённый список файлов+очереди и операции над ними.
 type MediaHandler struct {
-	Jobs    repo.JobRepo
-	Files   repo.FileRepo
-	Tags    repo.TagRepo
-	Tokens  repo.TokenRepo
-	Storage *storage.Storage
-	BaseURL string
-	Pool    Enqueuer
-	Cfg     *config.Config
+	Jobs     repo.JobRepo
+	Files    repo.FileRepo
+	Tags     repo.TagRepo
+	Tokens   repo.TokenRepo
+	Storage  *storage.Storage
+	BaseURL  string
+	Pool     Enqueuer
+	Cfg      *config.Config
+	Expander *playlist.Expander
 }
 
 // Page — полная страница (tab switching).
@@ -203,34 +205,17 @@ func (h *MediaHandler) Redownload(w http.ResponseWriter, r *http.Request) {
 			MaxFiles: h.Cfg.YtDlpMaxFilesPerRequest,
 			Timeout:  time.Duration(h.Cfg.YtDlpTimeout) * time.Second,
 		}
-		go h.tryExpandPlaylist(jobID, job.URL, opts)
+		go func(id, rawURL string) {
+			h.Expander.ResolvePlaceholder(context.Background(), id, rawURL, opts, "web", 0)
+			h.Pool.Enqueue()
+		}(jobID, job.URL)
 	} else {
-		// Нет конфига — сразу переводим в pending.
+		// Нет конфига (например в тестах) — сразу переводим в pending.
 		h.Jobs.ConfirmSingle(context.Background(), jobID) //nolint:errcheck
 		h.Pool.Enqueue()
 	}
 
 	h.List(w, r)
-}
-
-func (h *MediaHandler) tryExpandPlaylist(placeholderID, rawURL string, opts downloader.Options) {
-	ctx := context.Background()
-	info := downloader.FetchPlaylist(ctx, rawURL, opts)
-	if info == nil {
-		if err := h.Jobs.ConfirmSingle(ctx, placeholderID); err != nil {
-			slog.Error("media redownload: confirm single", "id", placeholderID, "err", err)
-			return
-		}
-		h.Pool.Enqueue()
-		return
-	}
-	if err := h.Jobs.DeleteChecking(ctx, placeholderID); err != nil {
-		slog.Error("media redownload: delete checking", "id", placeholderID, "err", err)
-	}
-	// Переиспользуем логику QueueHandler.
-	qh := &QueueHandler{Jobs: h.Jobs, Tags: h.Tags, Pool: h.Pool, Cfg: h.Cfg}
-	qh.doCreatePlaylistJobs(ctx, info, "web", 0)
-	h.Pool.Enqueue()
 }
 
 // AddTag добавляет тег к заданию.

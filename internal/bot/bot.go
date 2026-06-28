@@ -11,6 +11,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/dr-duke/talmorGo/internal/config"
+	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/worker"
 )
@@ -20,13 +21,14 @@ type Enqueuer interface {
 }
 
 type Bot struct {
-	cfg    *config.Config
-	api    *tgbotapi.BotAPI
-	jobs   repo.JobRepo
-	tokens repo.TokenRepo
-	files  repo.FileRepo
-	tags   repo.TagRepo
-	pool   Enqueuer
+	cfg      *config.Config
+	api      *tgbotapi.BotAPI
+	jobs     repo.JobRepo
+	tokens   repo.TokenRepo
+	files    repo.FileRepo
+	tags     repo.TagRepo
+	pool     Enqueuer
+	expander *playlist.Expander
 }
 
 func New(cfg *config.Config, jobs repo.JobRepo, files repo.FileRepo, tokens repo.TokenRepo, tags repo.TagRepo, pool Enqueuer) (*Bot, error) {
@@ -55,7 +57,10 @@ func New(cfg *config.Config, jobs repo.JobRepo, files repo.FileRepo, tokens repo
 
 	slog.Info("bot: authorized", "username", api.Self.UserName)
 
-	b := &Bot{cfg: cfg, api: api, jobs: jobs, files: files, tokens: tokens, tags: tags, pool: pool}
+	b := &Bot{
+		cfg: cfg, api: api, jobs: jobs, files: files, tokens: tokens, tags: tags, pool: pool,
+		expander: playlist.New(jobs, tags),
+	}
 	b.setCommands()
 	return b, nil
 }

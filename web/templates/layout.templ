@@ -280,14 +280,14 @@ templ Layout(title string, basePath string) {
 					overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 					flex: 1; margin-right: .5rem;
 				}
-				.player-close {
+				.player-close, .player-icon-btn {
 					display: inline-flex; align-items: center; justify-content: center;
 					width: 32px; height: 32px; border-radius: 9999px;
 					background: transparent; border: none;
 					color: var(--m3-on-surface-var); cursor: pointer;
 					transition: background .15s;
 				}
-				.player-close:hover { background: rgba(255,255,255,.1); }
+				.player-close:hover, .player-icon-btn:hover { background: rgba(255,255,255,.1); }
 
 				/* ── Log dialog ── */
 				dialog#log-dialog {
@@ -350,7 +350,7 @@ templ Layout(title string, basePath string) {
 			<dialog id="player-dialog">
 				<div class="player-header">
 					<span class="player-title" id="player-title"></span>
-					<button id="pip-btn" class="player-close" onclick="togglePiP()" title="Картинка в картинке" style="display:none">
+					<button id="pip-btn" class="player-icon-btn" onclick="togglePiP()" title="Картинка в картинке" style="display:none">
 						<span class="m3-icon">picture_in_picture</span>
 					</button>
 					<button class="player-close" onclick="closePlayer()">
