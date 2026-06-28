@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -29,15 +28,19 @@ func (h *SettingsHandler) Page(w http.ResponseWriter, r *http.Request) {
 	templ.Handler(templates.SettingsPage(h.Cfg.BasePath, h.SiteName, records)).ServeHTTP(w, r)
 }
 
-// Import принимает сырой Netscape-текст (весь cookies.txt), парсит по доменам и сохраняет.
+// Import принимает Netscape-текст (весь cookies.txt), парсит по доменам и сохраняет.
 func (h *SettingsHandler) Import(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20)) // 4 МБ лимит
-	if err != nil || len(body) == 0 {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "parse form", http.StatusBadRequest)
+		return
+	}
+	raw := r.FormValue("body")
+	if raw == "" {
 		http.Error(w, "empty body", http.StatusBadRequest)
 		return
 	}
 
-	byDomain := parseCookiesByDomain(string(body))
+	byDomain := parseCookiesByDomain(raw)
 	ctx := r.Context()
 	for domain, lines := range byDomain {
 		if err := h.Cookies.Upsert(ctx, domain, strings.Join(lines, "\n")); err != nil {

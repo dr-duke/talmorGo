@@ -7,7 +7,7 @@ func baseHref(basePath string) string {
 	return basePath + "/"
 }
 
-templ Layout(title string, basePath string, siteName string) {
+templ Layout(title string, basePath string, siteName string, isSettings bool) {
 	<!DOCTYPE html>
 	<html lang="ru">
 		<head>
@@ -82,6 +82,7 @@ templ Layout(title string, basePath string, siteName string) {
 				}
 				.logo-mark { display: block; flex-shrink: 0; }
 				.logo { font-size: 1.1rem; font-weight: 600; color: var(--m3-primary); letter-spacing: .01em; flex: 1; }
+				.header-home { display: contents; text-decoration: none; }
 				.header-settings { margin-left: auto; }
 
 				/* ── Content ── */
@@ -382,11 +383,19 @@ templ Layout(title string, basePath string, siteName string) {
 		</head>
 		<body>
 			<header>
-				<img class="logo-mark" src="static/logo.svg" width="28" height="28" alt=""/>
-				<span class="logo">{ siteName }</span>
-				<a href="settings" class="m3-icon-btn header-settings" title="Настройки">
-					<span class="m3-icon">settings</span>
+				<a href="." class="header-home">
+					<img class="logo-mark" src="static/logo.svg" width="28" height="28" alt=""/>
+					<span class="logo">{ siteName }</span>
 				</a>
+				if isSettings {
+					<a href="." class="m3-icon-btn header-settings" title="На главную">
+						<span class="m3-icon">home</span>
+					</a>
+				} else {
+					<a href="settings" class="m3-icon-btn header-settings" title="Настройки">
+						<span class="m3-icon">settings</span>
+					</a>
+				}
 			</header>
 			<main>
 				{ children... }

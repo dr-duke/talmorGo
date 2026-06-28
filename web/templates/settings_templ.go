@@ -48,7 +48,7 @@ func SettingsPage(basePath string, siteName string, records []*model.CookieRecor
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"content\"><section class=\"settings-section\"><h2 class=\"settings-heading\">Куки авторизации</h2><p class=\"settings-hint\">Вставьте содержимое файла <code>cookies.txt</code> в формате Netscape (экспортируется расширением браузера «Get cookies.txt LOCALLY» или аналогом). Куки применяются ко всем загрузкам yt-dlp.</p><form hx-post=\"settings/cookies/import\" hx-target=\"#cookie-domain-list\" hx-swap=\"outerHTML\" hx-encoding=\"text/plain\" onsubmit=\"this.reset()\" class=\"cookie-import-form\"><textarea name=\"body\" class=\"cookie-textarea\" placeholder=\"# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;1234567890&#9;COOKIE_NAME&#9;value\" rows=\"10\" required></textarea><div class=\"settings-actions\"><button type=\"submit\" class=\"m3-btn m3-btn-filled\"><span class=\"m3-icon\">upload_file</span> Импортировать</button></div></form></section>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"content\"><section class=\"settings-section\"><h2 class=\"settings-heading\">Куки авторизации</h2><p class=\"settings-hint\">Вставьте содержимое файла <code>cookies.txt</code> в формате Netscape (экспортируется расширением браузера «Get cookies.txt LOCALLY» или аналогом). Куки применяются ко всем загрузкам yt-dlp.</p><form hx-post=\"settings/cookies/import\" hx-target=\"#cookie-domain-list\" hx-swap=\"outerHTML\" hx-on:htmx:after-request=\"this.reset()\" class=\"cookie-import-form\"><textarea name=\"body\" class=\"cookie-textarea\" placeholder=\"# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;1234567890&#9;COOKIE_NAME&#9;value\" rows=\"10\" required></textarea><div class=\"settings-actions\"><button type=\"submit\" class=\"m3-btn m3-btn-filled\"><span class=\"m3-icon\">upload_file</span> Импортировать</button></div></form></section>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -62,7 +62,7 @@ func SettingsPage(basePath string, siteName string, records []*model.CookieRecor
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Настройки", basePath, siteName).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Настройки", basePath, siteName, true).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -113,7 +113,7 @@ func CookieDomainList(records []*model.CookieRecord) templ.Component {
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(rec.Domain)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/settings.templ`, Line: 57, Col: 51}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/settings.templ`, Line: 56, Col: 51}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -126,7 +126,7 @@ func CookieDomainList(records []*model.CookieRecord) templ.Component {
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(cookieLineCount(rec.Content))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/settings.templ`, Line: 58, Col: 69}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/settings.templ`, Line: 57, Col: 69}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -139,7 +139,7 @@ func CookieDomainList(records []*model.CookieRecord) templ.Component {
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs("settings/cookies/" + rec.Domain)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/settings.templ`, Line: 61, Col: 51}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/settings.templ`, Line: 60, Col: 51}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
@@ -152,7 +152,7 @@ func CookieDomainList(records []*model.CookieRecord) templ.Component {
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs("Удалить куки для " + rec.Domain + "?")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/settings.templ`, Line: 64, Col: 72}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/settings.templ`, Line: 63, Col: 72}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {

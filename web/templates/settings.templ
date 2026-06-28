@@ -8,7 +8,7 @@ import (
 )
 
 templ SettingsPage(basePath string, siteName string, records []*model.CookieRecord) {
-	@Layout("Настройки", basePath, siteName) {
+	@Layout("Настройки", basePath, siteName, true) {
 		<div id="content">
 			<section class="settings-section">
 				<h2 class="settings-heading">Куки авторизации</h2>
@@ -21,8 +21,7 @@ templ SettingsPage(basePath string, siteName string, records []*model.CookieReco
 					hx-post="settings/cookies/import"
 					hx-target="#cookie-domain-list"
 					hx-swap="outerHTML"
-					hx-encoding="text/plain"
-					onsubmit="this.reset()"
+					hx-on:htmx:after-request="this.reset()"
 					class="cookie-import-form"
 				>
 					<textarea
