@@ -350,6 +350,9 @@ templ Layout(title string, basePath string) {
 			<dialog id="player-dialog">
 				<div class="player-header">
 					<span class="player-title" id="player-title"></span>
+					<button id="pip-btn" class="player-close" onclick="togglePiP()" title="Картинка в картинке" style="display:none">
+						<span class="m3-icon">picture_in_picture</span>
+					</button>
 					<button class="player-close" onclick="closePlayer()">
 						<span class="m3-icon">close</span>
 					</button>
@@ -376,7 +379,52 @@ templ Layout(title string, basePath string) {
 						controls: ['play-large','play','progress','current-time','duration','mute','volume','fullscreen'],
 						ratio: '16:9',
 					});
+
+					// ── PiP (Picture-in-Picture) ──
+					var pipBtn = document.getElementById('pip-btn');
+					var video  = document.getElementById('plyr-video');
+					if (document.pictureInPictureEnabled) {
+						pipBtn.style.display = '';
+					}
+					video.addEventListener('enterpictureinpicture', function() {
+						pipBtn.querySelector('.m3-icon').textContent = 'picture_in_picture_alt';
+					});
+					video.addEventListener('leavepictureinpicture', function() {
+						pipBtn.querySelector('.m3-icon').textContent = 'picture_in_picture';
+						// Если диалог уже закрыт — паузим видео
+						if (!document.getElementById('player-dialog').open) plyrInstance.pause();
+					});
+
+					// ── Авто-полноэкранный режим при повороте ──
+					function _onOrientationChange() {
+						if (!document.getElementById('player-dialog').open) return;
+						// Небольшая задержка — браузер обновляет размеры после события
+						setTimeout(function() {
+							var isLandscape = screen.orientation
+								? screen.orientation.type.includes('landscape')
+								: Math.abs(window.orientation || 0) === 90;
+							if (isLandscape) {
+								if (!plyrInstance.fullscreen.active) plyrInstance.fullscreen.enter();
+							} else {
+								if (plyrInstance.fullscreen.active) plyrInstance.fullscreen.exit();
+							}
+						}, 150);
+					}
+					if (screen.orientation) {
+						screen.orientation.addEventListener('change', _onOrientationChange);
+					} else {
+						window.addEventListener('orientationchange', _onOrientationChange);
+					}
 				});
+
+				function togglePiP() {
+					var video = document.getElementById('plyr-video');
+					if (document.pictureInPictureElement) {
+						document.exitPictureInPicture();
+					} else if (document.pictureInPictureEnabled) {
+						video.requestPictureInPicture().catch(function(){});
+					}
+				}
 				function openPlayer(src, title) {
 					document.getElementById('player-title').textContent = title || src;
 					plyrInstance.source = { type: 'video', sources: [{ src: src, type: 'video/mp4' }] };
@@ -384,7 +432,8 @@ templ Layout(title string, basePath string) {
 					plyrInstance.play();
 				}
 				function closePlayer() {
-					plyrInstance.pause();
+					// Если активен PiP — не паузим (видео продолжает играть в мини-окне)
+					if (!document.pictureInPictureElement) plyrInstance.pause();
 					document.getElementById('player-dialog').close();
 				}
 				document.getElementById('player-dialog').addEventListener('click', function(e) {
