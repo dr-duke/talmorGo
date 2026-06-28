@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/a-h/templ"
@@ -200,11 +201,16 @@ func (h *MediaHandler) Redownload(w http.ResponseWriter, r *http.Request) {
 
 	// Запускаем проверку плейлиста в фоне (аналогично QueueHandler.Add).
 	if h.Cfg != nil {
+		cf := h.Cfg.CookiesFilePath()
+		if _, err := os.Stat(cf); err != nil {
+			cf = ""
+		}
 		opts := downloader.Options{
-			Binary:   h.Cfg.YtDlpBinary,
-			Proxy:    h.Cfg.YtDlpProxy,
-			MaxFiles: h.Cfg.YtDlpMaxFilesPerRequest,
-			Timeout:  time.Duration(h.Cfg.YtDlpTimeout) * time.Second,
+			Binary:      h.Cfg.YtDlpBinary,
+			Proxy:       h.Cfg.YtDlpProxy,
+			MaxFiles:    h.Cfg.YtDlpMaxFilesPerRequest,
+			Timeout:     time.Duration(h.Cfg.YtDlpTimeout) * time.Second,
+			CookiesFile: cf,
 		}
 		go func(id, rawURL string) {
 			h.Expander.ResolvePlaceholder(context.Background(), id, rawURL, opts, "web", 0)

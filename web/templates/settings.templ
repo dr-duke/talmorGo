@@ -7,7 +7,7 @@ import (
 	"github.com/dr-duke/talmorGo/internal/model"
 )
 
-templ SettingsPage(basePath string, siteName string, records []*model.CookieRecord) {
+templ SettingsPage(basePath string, siteName string, records []*model.CookieRecord, cookieFileStatus string) {
 	@Layout("Настройки", basePath, siteName, true) {
 		<div id="content">
 			<section class="settings-section">
@@ -15,7 +15,11 @@ templ SettingsPage(basePath string, siteName string, records []*model.CookieReco
 				<p class="settings-hint">
 					Вставьте содержимое файла <code>cookies.txt</code> в формате Netscape
 					(экспортируется расширением браузера «Get cookies.txt LOCALLY» или аналогом).
+					Для YouTube нужны куки <strong>авторизованной</strong> сессии с подтверждённым возрастом.
 					Куки применяются ко всем загрузкам yt-dlp.
+				</p>
+				<p class="settings-hint">
+					Файл на диске: <code>{ cookieFileStatus }</code>
 				</p>
 				<form
 					hx-post="settings/cookies/import"

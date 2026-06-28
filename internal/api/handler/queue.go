@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/dr-duke/talmorGo/internal/config"
@@ -70,11 +71,16 @@ func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("HX-Trigger", "mediaRefresh")
 	w.WriteHeader(http.StatusNoContent)
 
+	cf := h.Cfg.CookiesFilePath()
+	if _, err := os.Stat(cf); err != nil {
+		cf = ""
+	}
 	opts := downloader.Options{
-		Binary:   h.Cfg.YtDlpBinary,
-		Proxy:    h.Cfg.YtDlpProxy,
-		MaxFiles: h.Cfg.YtDlpMaxFilesPerRequest,
-		Timeout:  time.Duration(h.Cfg.YtDlpTimeout) * time.Second,
+		Binary:      h.Cfg.YtDlpBinary,
+		Proxy:       h.Cfg.YtDlpProxy,
+		MaxFiles:    h.Cfg.YtDlpMaxFilesPerRequest,
+		Timeout:     time.Duration(h.Cfg.YtDlpTimeout) * time.Second,
+		CookiesFile: cf,
 	}
 	// Асинхронно проверяем плейлист и сигналим воркеру; placeholder в статусе checking.
 	go func(id string) {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -25,7 +26,28 @@ func (h *SettingsHandler) Page(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
-	templ.Handler(templates.SettingsPage(h.Cfg.BasePath, h.SiteName, records)).ServeHTTP(w, r)
+	cf := h.Cfg.CookiesFilePath()
+	fileStatus := cookieFileStatus(cf)
+	templ.Handler(templates.SettingsPage(h.Cfg.BasePath, h.SiteName, records, fileStatus)).ServeHTTP(w, r)
+}
+
+func cookieFileStatus(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Sprintf("не найден (%s)", path)
+	}
+	return fmt.Sprintf("%s — %s", path, formatBytes(info.Size()))
+}
+
+func formatBytes(b int64) string {
+	switch {
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f МБ", float64(b)/(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%d КБ", b>>10)
+	default:
+		return fmt.Sprintf("%d байт", b)
+	}
 }
 
 // Import принимает Netscape-текст (весь cookies.txt), парсит по доменам и сохраняет.
