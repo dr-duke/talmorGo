@@ -50,7 +50,7 @@ templ MediaList(items []*model.MediaItem, tags []*model.Tag) {
 	<div
 		id="media-inner"
 		hx-get="media/list"
-		hx-trigger="every 5s, mediaRefresh from:body"
+		hx-trigger="mediaRefresh from:body"
 		hx-swap="outerHTML"
 	>
 		if len(items) == 0 {

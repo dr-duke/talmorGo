@@ -16,6 +16,7 @@ import (
 	"github.com/dr-duke/talmorGo/internal/db"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/internal/sse"
 	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/google/uuid"
 )
@@ -97,7 +98,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	cookieRepo := repo.NewCookieRepo(database)
 
 	cfg := &config.Config{BaseURL: "", BasePath: "", SiteName: "TalmorGo"}
-	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, storage.New(tmpDir), &fakePool{})
+	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, storage.New(tmpDir), &fakePool{}, sse.New())
 	ts := httptest.NewServer(srv.Handler())
 
 	return &testEnv{

@@ -104,7 +104,7 @@ func MediaList(items []*model.MediaItem, tags []*model.Tag) templ.Component {
 			templ_7745c5c3_Var4 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div id=\"media-inner\" hx-get=\"media/list\" hx-trigger=\"every 5s, mediaRefresh from:body\" hx-swap=\"outerHTML\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div id=\"media-inner\" hx-get=\"media/list\" hx-trigger=\"mediaRefresh from:body\" hx-swap=\"outerHTML\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

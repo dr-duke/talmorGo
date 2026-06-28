@@ -14,6 +14,7 @@ import (
 	"github.com/dr-duke/talmorGo/internal/downloader"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/internal/sse"
 )
 
 // NotifKind определяет тип уведомления.
@@ -53,6 +54,7 @@ type Pool struct {
 	notifier  Notifier
 	notify    chan struct{}
 	inFlight  *InFlightPaths
+	hub       *sse.Hub // nil если SSE не используется
 
 	mu          sync.Mutex
 	cancelFuncs map[string]context.CancelFunc // jobID → cancel активной закачки
@@ -68,6 +70,14 @@ func NewPool(cfg *config.Config, jobRepo repo.JobRepo, fileRepo repo.FileRepo, t
 		notify:      make(chan struct{}, cfg.WorkerCount),
 		cancelFuncs: make(map[string]context.CancelFunc),
 		inFlight:    NewInFlightPaths(),
+	}
+}
+
+func (p *Pool) SetHub(h *sse.Hub) { p.hub = h }
+
+func (p *Pool) broadcast() {
+	if p.hub != nil {
+		p.hub.Broadcast()
 	}
 }
 
@@ -180,9 +190,11 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		delete(p.cancelFuncs, job.ID)
 		p.mu.Unlock()
 		cancel()
+		p.broadcast() // уведомляем клиентов о завершении (done/failed/retrying)
 	}()
 
 	slog.Info("worker: processing job", "id", job.ID, "url", job.URL, "attempt", job.RetryCount+1)
+	p.broadcast() // уведомляем клиентов о старте (pending → running)
 
 	if p.tgJob(job) {
 		p.notifier.Notify(ctx, Notification{
@@ -269,6 +281,7 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		// Путь теперь в БД — AllPaths его видит; убираем из inFlight.
 		p.inFlight.Remove(finalPath)
 		slog.Info("worker: file saved", "name", f.Name, "id", f.ID)
+		p.broadcast() // файл появился в БД — уведомляем клиентов немедленно
 		fileCount++
 		if firstFile == nil {
 			firstFile = f

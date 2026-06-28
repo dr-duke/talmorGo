@@ -10,12 +10,14 @@ import (
 	"github.com/dr-duke/talmorGo/internal/downloader"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/internal/sse"
 )
 
 // Expander разворачивает плейлисты в отдельные задания.
 type Expander struct {
 	Jobs repo.JobRepo
 	Tags repo.TagRepo
+	Hub  *sse.Hub // опционально: уведомляет браузер после разворачивания
 }
 
 func New(jobs repo.JobRepo, tags repo.TagRepo) *Expander {
@@ -65,11 +67,14 @@ func (e *Expander) ResolvePlaceholder(ctx context.Context, placeholderID, rawURL
 		if err := e.Jobs.ConfirmSingle(ctx, placeholderID); err != nil {
 			slog.Error("playlist: confirm single", "id", placeholderID, "err", err)
 		}
-		return
+	} else {
+		// Плейлист: удаляем placeholder и создаём индивидуальные задания.
+		if err := e.Jobs.DeleteChecking(ctx, placeholderID); err != nil {
+			slog.Error("playlist: delete checking placeholder", "id", placeholderID, "err", err)
+		}
+		e.CreateJobs(ctx, info, source, chatID)
 	}
-	// Плейлист: удаляем placeholder и создаём индивидуальные задания.
-	if err := e.Jobs.DeleteChecking(ctx, placeholderID); err != nil {
-		slog.Error("playlist: delete checking placeholder", "id", placeholderID, "err", err)
+	if e.Hub != nil {
+		e.Hub.Broadcast()
 	}
-	e.CreateJobs(ctx, info, source, chatID)
 }

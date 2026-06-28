@@ -14,6 +14,7 @@ import (
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/db"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/internal/sse"
 	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/dr-duke/talmorGo/internal/worker"
 )
@@ -45,7 +46,10 @@ func main() {
 	tagRepo := repo.NewTagRepo(database)
 	cookieRepo := repo.NewCookieRepo(database)
 
+	hub := sse.New()
+
 	pool := worker.NewPool(cfg, jobRepo, fileRepo, tokenRepo, nil)
+	pool.SetHub(hub)
 
 	tgBot, err := bot.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, pool)
 	if err != nil {
@@ -55,7 +59,7 @@ func main() {
 	pool.SetNotifier(tgBot)
 
 	store := storage.New(cfg.YtDlpOutputDir)
-	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, store, pool)
+	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, store, pool, hub)
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPHost + ":" + cfg.HTTPPort,
 		Handler: srv.Handler(),

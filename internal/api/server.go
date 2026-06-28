@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/internal/sse"
 	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/dr-duke/talmorGo/web"
 	"github.com/dr-duke/talmorGo/web/templates"
@@ -29,6 +31,7 @@ func New(
 	cookies repo.CookieRepo,
 	store *storage.Storage,
 	pool handler.Enqueuer,
+	hub *sse.Hub,
 ) *Server {
 	basePath := strings.TrimRight(cfg.BasePath, "/")
 	siteName := cfg.SiteName
@@ -36,6 +39,7 @@ func New(
 	mux := http.NewServeMux()
 
 	expander := playlist.New(jobs, tags)
+	expander.Hub = hub
 
 	qh := &handler.QueueHandler{Jobs: jobs, Tags: tags, Pool: pool, Cfg: cfg, Expander: expander}
 	mh := &handler.MediaHandler{
@@ -84,6 +88,37 @@ func New(
 	mux.HandleFunc("GET /settings", sh.Page)
 	mux.HandleFunc("POST /settings/cookies/import", sh.Import)
 	mux.HandleFunc("DELETE /settings/cookies/{domain}", sh.DeleteDomain)
+
+	// SSE: клиент подписывается на обновления.
+	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no") // nginx: отключить буферизацию
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		ch, unsub := hub.Subscribe()
+		defer unsub()
+
+		// Первый пинг при подключении.
+		fmt.Fprint(w, "event: ping\ndata: ok\n\n")
+		flusher.Flush()
+
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ch:
+				fmt.Fprint(w, "event: update\ndata: 1\n\n")
+				flusher.Flush()
+			}
+		}
+	})
 
 	// Presigned link (публичный, без auth).
 	mux.HandleFunc("GET /f/{token}", lh.Resolve)

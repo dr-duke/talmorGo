@@ -682,6 +682,22 @@ templ Layout(title string, basePath string, siteName string) {
 					rebuildStatusChips();
 					applyFilters();
 				});
+
+				// ── SSE: обновление списка без polling ──
+				(function() {
+					function connect() {
+						var es = new EventSource('events');
+						es.addEventListener('update', function() {
+							htmx.trigger(document.body, 'mediaRefresh');
+						});
+						es.onerror = function() {
+							es.close();
+							// Переподключаемся через 3 секунды (сервер временно недоступен).
+							setTimeout(connect, 3000);
+						};
+					}
+					connect();
+				})();
 			</script>
 		</body>
 	</html>
