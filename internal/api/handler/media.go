@@ -3,10 +3,9 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/a-h/templ"
@@ -89,7 +88,7 @@ func (h *MediaHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	os.Remove(f.Path) //nolint:errcheck
+	h.Storage.Delete(f.Path) //nolint:errcheck
 	if err := h.Files.Delete(r.Context(), id); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -105,7 +104,7 @@ func (h *MediaHandler) PurgeJob(w http.ResponseWriter, r *http.Request) {
 	if files, err := h.Files.ListByJobID(r.Context(), jobID); err == nil {
 		for _, f := range files {
 			if f.IsAvailable() {
-				os.Remove(f.Path) //nolint:errcheck
+				h.Storage.Delete(f.Path) //nolint:errcheck
 			}
 		}
 	}
@@ -144,8 +143,13 @@ func (h *MediaHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
 	}
-	newPath := filepath.Join(filepath.Dir(f.Path), body.Name)
-	if err := os.Rename(f.Path, newPath); err != nil {
+	// Storage.Rename санирует имя (защита от path traversal) и переименовывает на диске.
+	newPath, err := h.Storage.Rename(f.Path, body.Name)
+	if err != nil {
+		if errors.Is(err, storage.ErrInvalidName) {
+			http.Error(w, "invalid file name", http.StatusBadRequest)
+			return
+		}
 		http.Error(w, "rename failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -180,7 +184,7 @@ func (h *MediaHandler) Redownload(w http.ResponseWriter, r *http.Request) {
 	// Удаляем физические файлы с диска.
 	if files, err := h.Files.ListByJobID(r.Context(), jobID); err == nil {
 		for _, f := range files {
-			os.Remove(f.Path) //nolint:errcheck
+			h.Storage.Delete(f.Path) //nolint:errcheck
 		}
 	}
 	if err := h.Files.DeleteAllByJobID(r.Context(), jobID); err != nil {
