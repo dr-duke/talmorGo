@@ -81,7 +81,8 @@ templ Layout(title string, basePath string, siteName string) {
 					position: sticky; top: 0; z-index: 20;
 				}
 				.logo-mark { display: block; flex-shrink: 0; }
-				.logo { font-size: 1.1rem; font-weight: 600; color: var(--m3-primary); letter-spacing: .01em; }
+				.logo { font-size: 1.1rem; font-weight: 600; color: var(--m3-primary); letter-spacing: .01em; flex: 1; }
+				.header-settings { margin-left: auto; }
 
 				/* ── Content ── */
 				#content { padding: 1rem 1.25rem; max-width: 1100px; margin: 0 auto; }
@@ -337,6 +338,32 @@ templ Layout(title string, basePath string, siteName string) {
 					background: #0a0a0d;
 				}
 
+				/* ── Settings page ── */
+				.settings-section { margin-bottom: 2rem; }
+				.settings-heading { font-size: 1.1rem; font-weight: 600; color: var(--m3-on-surface); margin-bottom: .5rem; }
+				.settings-subheading { font-size: .95rem; font-weight: 600; color: var(--m3-on-surface); margin-bottom: .75rem; }
+				.settings-hint { font-size: .85rem; color: var(--m3-on-surface-var); margin-bottom: 1rem; }
+				.settings-hint code { font-family: monospace; background: var(--m3-surface-var); padding: .1em .4em; border-radius: 4px; }
+				.settings-empty { font-size: .875rem; color: var(--m3-on-surface-var); }
+				.settings-actions { display: flex; gap: .75rem; margin-top: .75rem; }
+				.cookie-import-form { display: flex; flex-direction: column; }
+				.cookie-textarea {
+					width: 100%; box-sizing: border-box;
+					background: var(--m3-surface-var); border: 1px solid var(--m3-outline-var);
+					border-radius: 12px; color: var(--m3-on-surface);
+					font-family: monospace; font-size: .8rem;
+					padding: .75rem 1rem; resize: vertical; outline: none;
+				}
+				.cookie-textarea:focus { border-color: var(--m3-primary); }
+				.cookie-domain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+				.cookie-domain-item {
+					display: flex; align-items: center; gap: .75rem;
+					background: var(--m3-surface); border: 1px solid var(--m3-outline-var);
+					border-radius: 10px; padding: .6rem 1rem;
+				}
+				.cookie-domain-name { font-weight: 500; font-size: .9rem; flex: 1; }
+				.cookie-domain-meta { font-size: .75rem; color: var(--m3-on-surface-var); }
+
 				/* ── Mobile ── */
 				@media (max-width: 600px) {
 					header { padding: .75rem; }
@@ -357,6 +384,9 @@ templ Layout(title string, basePath string, siteName string) {
 			<header>
 				<img class="logo-mark" src="static/logo.svg" width="28" height="28" alt=""/>
 				<span class="logo">{ siteName }</span>
+				<a href="settings" class="m3-icon-btn header-settings" title="Настройки">
+					<span class="m3-icon">settings</span>
+				</a>
 			</header>
 			<main>
 				{ children... }

@@ -31,6 +31,7 @@ type Options struct {
 	Timeout      time.Duration
 	MaxFiles     int // передаётся в --playlist-items "1:N"; 0 — без лимита
 	ExtraArgs    []string
+	CookiesFile  string // путь к Netscape cookies.txt; пусто — куки не используются
 }
 
 // Run запускает yt-dlp для указанного URL и возвращает канал событий.
@@ -173,6 +174,9 @@ func buildArgs(url string, opts Options) []string {
 	}
 	if opts.Proxy != "" {
 		args = append(args, "--proxy", opts.Proxy)
+	}
+	if opts.CookiesFile != "" {
+		args = append(args, "--cookies", opts.CookiesFile)
 	}
 	args = append(args, opts.ExtraArgs...)
 	args = append(args, url)

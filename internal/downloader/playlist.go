@@ -41,6 +41,9 @@ func FetchPlaylist(ctx context.Context, url string, opts Options) *PlaylistInfo 
 	if opts.Proxy != "" {
 		args = append(args, "--proxy", opts.Proxy)
 	}
+	if opts.CookiesFile != "" {
+		args = append(args, "--cookies", opts.CookiesFile)
+	}
 	args = append(args, url)
 
 	cmd := exec.CommandContext(ctx, opts.Binary, args...)

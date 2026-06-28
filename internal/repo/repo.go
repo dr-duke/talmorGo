@@ -73,3 +73,14 @@ type TagRepo interface {
 	AddToJob(ctx context.Context, jobID, tagID string) error
 	RemoveFromJob(ctx context.Context, jobID, tagName string) error
 }
+
+type CookieRepo interface {
+	// Upsert сохраняет (или заменяет) куки для домена.
+	Upsert(ctx context.Context, domain, content string) error
+	// List возвращает все записи, отсортированные по домену.
+	List(ctx context.Context) ([]*model.CookieRecord, error)
+	// Delete удаляет запись домена.
+	Delete(ctx context.Context, domain string) error
+	// MergeAll объединяет куки всех доменов в один Netscape-блок.
+	MergeAll(ctx context.Context) (string, error)
+}

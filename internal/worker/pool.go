@@ -204,6 +204,11 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 	}
 	defer os.RemoveAll(jobStaging) // чистим staging при любом исходе
 
+	cookiesFile := ""
+	if cf := p.cfg.CookiesFilePath(); fileExists(cf) {
+		cookiesFile = cf
+	}
+
 	opts := downloader.Options{
 		Binary:       p.cfg.YtDlpBinary,
 		OutputDir:    jobStaging,
@@ -212,6 +217,7 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		Timeout:      time.Duration(p.cfg.YtDlpTimeout) * time.Second,
 		MaxFiles:     p.cfg.YtDlpMaxFilesPerRequest,
 		ExtraArgs:    p.cfg.ExtraArgsList(),
+		CookiesFile:  cookiesFile,
 	}
 
 	var firstFile *model.File
@@ -377,6 +383,11 @@ func (p *Pool) handleFailure(ctx context.Context, job *model.Job, lastErr error)
 			RetryAt:   retryIn,
 		})
 	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func formatDuration(d time.Duration) string {

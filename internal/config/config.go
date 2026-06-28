@@ -74,6 +74,12 @@ func (c *Config) StagingDir() string {
 	return filepath.Join(c.YtDlpOutputDir, ".talmor-tmp")
 }
 
+// CookiesFilePath — путь к объединённому Netscape-файлу кук в зоне OutputDir.
+// Начинается с точки, поэтому DirScanner его пропускает.
+func (c *Config) CookiesFilePath() string {
+	return filepath.Join(c.YtDlpOutputDir, ".talmor-cookies.txt")
+}
+
 // ExtraArgsList возвращает YT_DLP_EXTRA_ARGS как слайс строк.
 func (c *Config) ExtraArgsList() []string {
 	s := strings.TrimSpace(c.YtDlpExtraArgs)

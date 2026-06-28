@@ -43,6 +43,7 @@ func main() {
 	fileRepo := repo.NewFileRepo(database)
 	tokenRepo := repo.NewTokenRepo(database)
 	tagRepo := repo.NewTagRepo(database)
+	cookieRepo := repo.NewCookieRepo(database)
 
 	pool := worker.NewPool(cfg, jobRepo, fileRepo, tokenRepo, nil)
 
@@ -54,7 +55,7 @@ func main() {
 	pool.SetNotifier(tgBot)
 
 	store := storage.New(cfg.YtDlpOutputDir)
-	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, store, pool)
+	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, store, pool)
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPHost + ":" + cfg.HTTPPort,
 		Handler: srv.Handler(),

@@ -123,3 +123,10 @@ type Tag struct {
 	ID   string
 	Name string
 }
+
+// CookieRecord — куки одного домена (Netscape-формат), хранимые в БД.
+type CookieRecord struct {
+	Domain    string
+	Content   string // Netscape-строки для этого домена
+	UpdatedAt string
+}

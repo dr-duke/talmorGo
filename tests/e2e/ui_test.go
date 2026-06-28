@@ -94,9 +94,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	fileRepo := repo.NewFileRepo(database)
 	tokenRepo := repo.NewTokenRepo(database)
 	tagRepo := repo.NewTagRepo(database)
+	cookieRepo := repo.NewCookieRepo(database)
 
 	cfg := &config.Config{BaseURL: "", BasePath: ""}
-	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, storage.New(tmpDir), &fakePool{})
+	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, storage.New(tmpDir), &fakePool{})
 	ts := httptest.NewServer(srv.Handler())
 
 	return &testEnv{

@@ -26,6 +26,7 @@ func New(
 	files repo.FileRepo,
 	tokens repo.TokenRepo,
 	tags repo.TagRepo,
+	cookies repo.CookieRepo,
 	store *storage.Storage,
 	pool handler.Enqueuer,
 ) *Server {
@@ -43,6 +44,7 @@ func New(
 		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg, Expander: expander,
 	}
 	lh := &handler.LinkHandler{Tokens: tokens, Files: files}
+	sh := &handler.SettingsHandler{Cookies: cookies, Cfg: cfg, SiteName: siteName}
 
 	// Статика.
 	staticSub, _ := fs.Sub(web.StaticFiles, "static")
@@ -77,6 +79,11 @@ func New(
 	mux.HandleFunc("POST /queue", qh.Add)
 	mux.HandleFunc("DELETE /queue/{id}", qh.Delete)
 	mux.HandleFunc("POST /jobs/{id}/retry", qh.Retry)
+
+	// Настройки.
+	mux.HandleFunc("GET /settings", sh.Page)
+	mux.HandleFunc("POST /settings/cookies/import", sh.Import)
+	mux.HandleFunc("DELETE /settings/cookies/{domain}", sh.DeleteDomain)
 
 	// Presigned link (публичный, без auth).
 	mux.HandleFunc("GET /f/{token}", lh.Resolve)
