@@ -405,9 +405,6 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 			<dialog id="player-dialog">
 				<div class="player-header">
 					<span class="player-title" id="player-title"></span>
-					<button id="pip-btn" class="player-icon-btn" onclick="togglePiP()" title="Картинка в картинке" style="display:none">
-						<span class="m3-icon">picture_in_picture</span>
-					</button>
 					<button class="player-close" onclick="closePlayer()">
 						<span class="m3-icon">close</span>
 					</button>
@@ -434,91 +431,17 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 						controls: ['play-large','play','progress','current-time','duration','mute','volume','fullscreen'],
 						ratio: '16:9',
 					});
-
-					var pipBtn = document.getElementById('pip-btn');
-					var video  = document.getElementById('plyr-video');
-
-					// ── PiP (Picture-in-Picture) ──
-					// iOS < 16 использует webkit API; iOS 16+ и остальные — стандартный W3C API.
-					function _pipSupported() {
-						return document.pictureInPictureEnabled ||
-							(video.webkitSupportsPresentationMode &&
-							 video.webkitSupportsPresentationMode('picture-in-picture'));
-					}
-					function _inPiP() {
-						return document.pictureInPictureElement === video ||
-							video.webkitPresentationMode === 'picture-in-picture';
-					}
-					function _setPipIcon(active) {
-						pipBtn.querySelector('.m3-icon').textContent =
-							active ? 'picture_in_picture_alt' : 'picture_in_picture';
-					}
-					if (_pipSupported()) pipBtn.style.display = '';
-
-					// Стандартные события (Chrome, Firefox, Safari 16+)
-					video.addEventListener('enterpictureinpicture', function() { _setPipIcon(true); });
-					video.addEventListener('leavepictureinpicture', function() {
-						_setPipIcon(false);
-						if (!document.getElementById('player-dialog').open) plyrInstance.pause();
-					});
-					// WebKit-события (iOS < 16)
-					video.addEventListener('webkitpresentationmodechanged', function() {
-						var isPiP = video.webkitPresentationMode === 'picture-in-picture';
-						_setPipIcon(isPiP);
-						if (!isPiP && !document.getElementById('player-dialog').open) plyrInstance.pause();
-					});
-
-					// ── Авто-полноэкранный режим при повороте ──
-					// screen.orientation появился в iOS Safari 16.4; старше — window.orientation.
-					function _isLandscape() {
-						if (screen.orientation) return screen.orientation.type.includes('landscape');
-						return Math.abs(window.orientation || 0) === 90;
-					}
-					function _onOrientationChange() {
-						if (!document.getElementById('player-dialog').open) return;
-						setTimeout(function() {
-							if (_isLandscape()) {
-								if (!plyrInstance.fullscreen.active) plyrInstance.fullscreen.enter();
-							} else {
-								if (plyrInstance.fullscreen.active) plyrInstance.fullscreen.exit();
-							}
-						}, 150);
-					}
-					// Слушаем оба события — modern и legacy
-					if (screen.orientation) screen.orientation.addEventListener('change', _onOrientationChange);
-					window.addEventListener('orientationchange', _onOrientationChange);
 				});
 
-				function togglePiP() {
-					var video = document.getElementById('plyr-video');
-					// W3C API (iOS 16+, Chrome, Firefox, Safari desktop)
-					if (document.pictureInPictureEnabled) {
-						if (document.pictureInPictureElement) document.exitPictureInPicture();
-						else video.requestPictureInPicture().catch(function(){});
-					// WebKit API (iOS < 16)
-					} else if (video.webkitSupportsPresentationMode &&
-					           video.webkitSupportsPresentationMode('picture-in-picture')) {
-						var mode = video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture';
-						video.webkitSetPresentationMode(mode);
-					}
-				}
 				function openPlayer(src, title) {
 					document.getElementById('player-title').textContent = title || src;
 					plyrInstance.source = { type: 'video', sources: [{ src: src, type: 'video/mp4' }] };
 					document.getElementById('player-dialog').showModal();
 					plyrInstance.play();
 				}
-				function _playerInPiP() {
-					var v = document.querySelector('#player-dialog video');
-					if (!v) return false;
-					return document.pictureInPictureElement === v ||
-					       v.webkitPresentationMode === 'picture-in-picture';
-				}
-				// Вся логика паузы — только здесь: ESC, backdrop, кнопка — все пути
+				// Пауза при любом способе закрытия: ESC, backdrop, кнопка
 				document.getElementById('player-dialog').addEventListener('close', function() {
-					if (_playerInPiP()) return;
 					try { plyrInstance.pause(); } catch(e) {}
-					// Прямая пауза на DOM-элементе как надёжный fallback
 					var v = document.querySelector('#player-dialog video');
 					if (v && !v.paused) v.pause();
 				});
