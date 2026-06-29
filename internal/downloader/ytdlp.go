@@ -19,7 +19,7 @@ type Event struct {
 	// Path — полный путь к файлу.
 	Path string
 	Err  error
-	// Log — полный вывод stderr (только в финальном событии после завершения процесса).
+	// Log — полный вывод stderr + нераспознанные строки stdout (финальное событие после завершения процесса).
 	Log string
 }
 
@@ -98,6 +98,11 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 					ch <- Event{FileName: filepath.Base(text), Path: text}
 				} else {
 					slog.Debug("yt-dlp stdout", "line", text)
+					mu.Lock()
+					if len(logLines) < maxLogLines {
+						logLines = append(logLines, "[out] "+text)
+					}
+					mu.Unlock()
 				}
 			}
 		}()
