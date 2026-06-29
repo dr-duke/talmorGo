@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,14 +49,15 @@ type Notifier interface {
 }
 
 type Pool struct {
-	cfg       *config.Config
-	jobRepo   repo.JobRepo
-	fileRepo  repo.FileRepo
-	tokenRepo repo.TokenRepo
-	notifier  Notifier
-	notify    chan struct{}
-	inFlight  *InFlightPaths
-	hub       *sse.Hub // nil если SSE не используется
+	cfg          *config.Config
+	jobRepo      repo.JobRepo
+	fileRepo     repo.FileRepo
+	tokenRepo    repo.TokenRepo
+	settingsRepo repo.SettingsRepo // nil допустимо; настройки из БД перекрывают конфиг
+	notifier     Notifier
+	notify       chan struct{}
+	inFlight     *InFlightPaths
+	hub          *sse.Hub // nil если SSE не используется
 
 	mu          sync.Mutex
 	cancelFuncs map[string]context.CancelFunc // jobID → cancel активной закачки
@@ -73,7 +76,8 @@ func NewPool(cfg *config.Config, jobRepo repo.JobRepo, fileRepo repo.FileRepo, t
 	}
 }
 
-func (p *Pool) SetHub(h *sse.Hub) { p.hub = h }
+func (p *Pool) SetHub(h *sse.Hub)               { p.hub = h }
+func (p *Pool) SetSettingsRepo(sr repo.SettingsRepo) { p.settingsRepo = sr }
 
 func (p *Pool) broadcast() {
 	if p.hub != nil {
@@ -216,21 +220,7 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 	}
 	defer os.RemoveAll(jobStaging) // чистим staging при любом исходе
 
-	cookiesFile := ""
-	if cf := p.cfg.CookiesFilePath(); fileExists(cf) {
-		cookiesFile = cf
-	}
-
-	opts := downloader.Options{
-		Binary:       p.cfg.YtDlpBinary,
-		OutputDir:    jobStaging,
-		OutputFormat: p.cfg.YtDlpOutputFormat,
-		Proxy:        p.cfg.YtDlpProxy,
-		Timeout:      time.Duration(p.cfg.YtDlpTimeout) * time.Second,
-		MaxFiles:     p.cfg.YtDlpMaxFilesPerRequest,
-		ExtraArgs:    p.cfg.ExtraArgsList(),
-		CookiesFile:  cookiesFile,
-	}
+	opts := p.resolveOpts(ctx, jobStaging)
 
 	var firstFile *model.File
 	var lastErr error
@@ -395,6 +385,53 @@ func (p *Pool) handleFailure(ctx context.Context, job *model.Job, lastErr error)
 			JobURL:    job.URL,
 			RetryAt:   retryIn,
 		})
+	}
+}
+
+// resolveOpts строит Options для yt-dlp, перекрывая значения конфига настройками из БД.
+func (p *Pool) resolveOpts(ctx context.Context, outputDir string) downloader.Options {
+	proxy := p.cfg.YtDlpProxy
+	outputFormat := p.cfg.YtDlpOutputFormat
+	maxFiles := p.cfg.YtDlpMaxFilesPerRequest
+	timeout := time.Duration(p.cfg.YtDlpTimeout) * time.Second
+	extraArgs := p.cfg.ExtraArgsList()
+
+	if p.settingsRepo != nil {
+		if v, _ := p.settingsRepo.Get(ctx, "yt_dlp_proxy"); v != "" {
+			proxy = v
+		}
+		if v, _ := p.settingsRepo.Get(ctx, "yt_dlp_output_format"); v != "" {
+			outputFormat = v
+		}
+		if v, _ := p.settingsRepo.Get(ctx, "yt_dlp_max_files"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				maxFiles = n
+			}
+		}
+		if v, _ := p.settingsRepo.Get(ctx, "yt_dlp_timeout"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				timeout = time.Duration(n) * time.Second
+			}
+		}
+		if v, _ := p.settingsRepo.Get(ctx, "yt_dlp_extra_args"); v != "" {
+			extraArgs = strings.Fields(v)
+		}
+	}
+
+	cookiesFile := ""
+	if cf := p.cfg.CookiesFilePath(); fileExists(cf) {
+		cookiesFile = cf
+	}
+
+	return downloader.Options{
+		Binary:       p.cfg.YtDlpBinary,
+		OutputDir:    outputDir,
+		OutputFormat: outputFormat,
+		Proxy:        proxy,
+		Timeout:      timeout,
+		MaxFiles:     maxFiles,
+		ExtraArgs:    extraArgs,
+		CookiesFile:  cookiesFile,
 	}
 }
 

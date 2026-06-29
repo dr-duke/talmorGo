@@ -17,6 +17,7 @@ import (
 
 type SettingsHandler struct {
 	Cookies  repo.CookieRepo
+	Settings repo.SettingsRepo
 	Jobs     repo.JobRepo
 	Files    repo.FileRepo
 	Storage  *storage.Storage
@@ -25,14 +26,56 @@ type SettingsHandler struct {
 }
 
 func (h *SettingsHandler) Page(w http.ResponseWriter, r *http.Request) {
-	records, err := h.Cookies.List(r.Context())
+	ctx := r.Context()
+	records, err := h.Cookies.List(ctx)
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
 	cf := h.Cfg.CookiesFilePath()
 	fileStatus := cookieFileStatus(cf)
-	templ.Handler(templates.SettingsPage(h.Cfg.BasePath, h.SiteName, records, fileStatus)).ServeHTTP(w, r)
+	rtSettings := h.loadRuntimeSettings(ctx)
+	templ.Handler(templates.SettingsPage(h.Cfg.BasePath, h.SiteName, records, fileStatus, rtSettings, h.runtimeDefaults())).ServeHTTP(w, r)
+}
+
+// SaveRuntimeSettings сохраняет настройки загрузчика из формы.
+func (h *SettingsHandler) SaveRuntimeSettings(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "parse form", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	keys := []string{"yt_dlp_proxy", "yt_dlp_extra_args", "yt_dlp_output_format", "yt_dlp_max_files", "yt_dlp_timeout"}
+	for _, k := range keys {
+		val := strings.TrimSpace(r.FormValue(k))
+		if err := h.Settings.Set(ctx, k, val); err != nil {
+			slog.Error("settings: save runtime setting", "key", k, "err", err)
+		}
+	}
+	rtSettings := h.loadRuntimeSettings(ctx)
+	templ.Handler(templates.RuntimeSettingsSection(h.Cfg.BasePath, rtSettings, h.runtimeDefaults())).ServeHTTP(w, r)
+}
+
+func (h *SettingsHandler) loadRuntimeSettings(ctx context.Context) map[string]string {
+	if h.Settings == nil {
+		return map[string]string{}
+	}
+	m, _ := h.Settings.All(ctx)
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
+}
+
+// runtimeDefaults возвращает значения из конфига — показываются как placeholder в форме.
+func (h *SettingsHandler) runtimeDefaults() map[string]string {
+	return map[string]string{
+		"yt_dlp_proxy":         h.Cfg.YtDlpProxy,
+		"yt_dlp_extra_args":    h.Cfg.YtDlpExtraArgs,
+		"yt_dlp_output_format": h.Cfg.YtDlpOutputFormat,
+		"yt_dlp_max_files":     fmt.Sprintf("%d", h.Cfg.YtDlpMaxFilesPerRequest),
+		"yt_dlp_timeout":       fmt.Sprintf("%d", h.Cfg.YtDlpTimeout),
+	}
 }
 
 func cookieFileStatus(path string) string {

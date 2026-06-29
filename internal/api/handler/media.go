@@ -6,12 +6,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
-	"time"
 
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/config"
-	"github.com/dr-duke/talmorGo/internal/downloader"
 	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/storage"
@@ -28,6 +25,7 @@ type MediaHandler struct {
 	BaseURL  string
 	Pool     Enqueuer
 	Cfg      *config.Config
+	Settings repo.SettingsRepo
 	Expander *playlist.Expander
 }
 
@@ -201,17 +199,7 @@ func (h *MediaHandler) Redownload(w http.ResponseWriter, r *http.Request) {
 
 	// Запускаем проверку плейлиста в фоне (аналогично QueueHandler.Add).
 	if h.Cfg != nil {
-		cf := h.Cfg.CookiesFilePath()
-		if _, err := os.Stat(cf); err != nil {
-			cf = ""
-		}
-		opts := downloader.Options{
-			Binary:      h.Cfg.YtDlpBinary,
-			Proxy:       h.Cfg.YtDlpProxy,
-			MaxFiles:    h.Cfg.YtDlpMaxFilesPerRequest,
-			Timeout:     time.Duration(h.Cfg.YtDlpTimeout) * time.Second,
-			CookiesFile: cf,
-		}
+		opts := resolveExpanderOpts(r.Context(), h.Cfg, h.Settings)
 		go func(id, rawURL string) {
 			h.Expander.ResolvePlaceholder(context.Background(), id, rawURL, opts, "web", 0)
 			h.Pool.Enqueue()

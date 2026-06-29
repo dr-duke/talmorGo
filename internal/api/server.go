@@ -29,6 +29,7 @@ func New(
 	tokens repo.TokenRepo,
 	tags repo.TagRepo,
 	cookies repo.CookieRepo,
+	settings repo.SettingsRepo,
 	store *storage.Storage,
 	pool handler.Enqueuer,
 	hub *sse.Hub,
@@ -41,14 +42,14 @@ func New(
 	expander := playlist.New(jobs, tags)
 	expander.Hub = hub
 
-	qh := &handler.QueueHandler{Jobs: jobs, Tags: tags, Pool: pool, Cfg: cfg, Expander: expander}
+	qh := &handler.QueueHandler{Jobs: jobs, Tags: tags, Pool: pool, Cfg: cfg, Settings: settings, Expander: expander}
 	mh := &handler.MediaHandler{
 		Jobs: jobs, Files: files, Tags: tags,
 		Tokens: tokens, Storage: store,
-		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg, Expander: expander,
+		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg, Settings: settings, Expander: expander,
 	}
 	lh := &handler.LinkHandler{Tokens: tokens, Files: files}
-	sh := &handler.SettingsHandler{Cookies: cookies, Jobs: jobs, Files: files, Storage: store, Cfg: cfg, SiteName: siteName}
+	sh := &handler.SettingsHandler{Cookies: cookies, Settings: settings, Jobs: jobs, Files: files, Storage: store, Cfg: cfg, SiteName: siteName}
 
 	// Статика.
 	staticSub, _ := fs.Sub(web.StaticFiles, "static")
@@ -89,6 +90,7 @@ func New(
 	mux.HandleFunc("POST /settings/cookies/import", sh.Import)
 	mux.HandleFunc("DELETE /settings/cookies/{domain}", sh.DeleteDomain)
 	mux.HandleFunc("POST /settings/cleanup", sh.Cleanup)
+	mux.HandleFunc("POST /settings/runtime", sh.SaveRuntimeSettings)
 
 	// SSE: клиент подписывается на обновления.
 	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {

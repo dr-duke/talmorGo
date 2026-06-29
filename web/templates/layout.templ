@@ -352,6 +352,32 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 				.settings-empty { font-size: .875rem; color: var(--m3-on-surface-var); }
 				.settings-actions { display: flex; gap: .75rem; margin-top: .75rem; }
 				.cleanup-result { font-size: .875rem; color: var(--m3-on-surface-var); margin-top: .75rem; }
+				.runtime-settings-form { display: flex; flex-direction: column; gap: 0; }
+				.runtime-settings-grid {
+					display: grid;
+					grid-template-columns: 200px 1fr;
+					gap: .6rem 1rem;
+					align-items: start;
+					margin-bottom: .75rem;
+				}
+				@media (max-width: 600px) {
+					.runtime-settings-grid { grid-template-columns: 1fr; }
+					.runtime-label { margin-top: .4rem; }
+				}
+				.runtime-label {
+					font-size: .875rem; font-weight: 500;
+					color: var(--m3-on-surface); padding-top: .45rem;
+				}
+				.runtime-field { display: flex; flex-direction: column; gap: .2rem; }
+				.runtime-input {
+					width: 100%; box-sizing: border-box;
+					background: var(--m3-surface-var); border: 1px solid var(--m3-outline-var);
+					border-radius: 8px; color: var(--m3-on-surface);
+					font-size: .875rem; padding: .4rem .75rem; outline: none;
+				}
+				.runtime-input:focus { border-color: var(--m3-primary); }
+				.runtime-input-narrow { max-width: 120px; }
+				.runtime-input::placeholder { color: var(--m3-on-surface-var); opacity: .6; }
 				.cookie-import-form { display: flex; flex-direction: column; }
 				.cookie-textarea {
 					width: 100%; box-sizing: border-box;

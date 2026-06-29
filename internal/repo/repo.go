@@ -81,6 +81,15 @@ type TagRepo interface {
 	RemoveFromJob(ctx context.Context, jobID, tagName string) error
 }
 
+type SettingsRepo interface {
+	// Get возвращает значение настройки; пустая строка если не задана.
+	Get(ctx context.Context, key string) (string, error)
+	// Set сохраняет значение; пустая строка удаляет запись (сброс к дефолту конфига).
+	Set(ctx context.Context, key, value string) error
+	// All возвращает все сохранённые настройки.
+	All(ctx context.Context) (map[string]string, error)
+}
+
 type CookieRepo interface {
 	// Upsert сохраняет (или заменяет) куки для домена.
 	Upsert(ctx context.Context, domain, content string) error

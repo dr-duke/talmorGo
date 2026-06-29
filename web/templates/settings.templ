@@ -7,9 +7,10 @@ import (
 	"github.com/dr-duke/talmorGo/internal/model"
 )
 
-templ SettingsPage(basePath string, siteName string, records []*model.CookieRecord, cookieFileStatus string) {
+templ SettingsPage(basePath string, siteName string, records []*model.CookieRecord, cookieFileStatus string, rtSettings map[string]string, rtDefaults map[string]string) {
 	@Layout("Настройки", basePath, siteName, true) {
 		<div id="content">
+			@RuntimeSettingsSection(basePath, rtSettings, rtDefaults)
 			<section class="settings-section">
 				<h2 class="settings-heading">Куки авторизации</h2>
 				<p class="settings-hint">
@@ -91,6 +92,101 @@ templ CookieDomainList(records []*model.CookieRecord) {
 				}
 			</ul>
 		}
+	</section>
+}
+
+// rtVal возвращает значение из DB-оверрайда; если не задано — из конфига (defaults).
+func rtVal(settings, defaults map[string]string, key string) string {
+	if v := settings[key]; v != "" {
+		return v
+	}
+	return defaults[key]
+}
+
+templ RuntimeSettingsSection(basePath string, rtSettings map[string]string, rtDefaults map[string]string) {
+	<section id="runtime-settings-section" class="settings-section">
+		<h2 class="settings-heading">Параметры загрузчика</h2>
+		<p class="settings-hint">
+			Значения перекрывают конфигурацию без перезапуска. Оставьте поле пустым,
+			чтобы использовать значение из конфига.
+		</p>
+		<form
+			hx-post="settings/runtime"
+			hx-target="#runtime-settings-section"
+			hx-swap="outerHTML"
+			class="runtime-settings-form"
+		>
+			<div class="runtime-settings-grid">
+				<label class="runtime-label" for="rs-proxy">Прокси yt-dlp</label>
+				<div class="runtime-field">
+					<input
+						id="rs-proxy"
+						type="text"
+						name="yt_dlp_proxy"
+						class="runtime-input"
+						value={ rtSettings["yt_dlp_proxy"] }
+						placeholder={ rtDefaults["yt_dlp_proxy"] }
+					/>
+					<span class="settings-hint">HTTP/SOCKS5 URL, например <code>socks5://127.0.0.1:1080</code></span>
+				</div>
+				<label class="runtime-label" for="rs-extra">Доп. аргументы yt-dlp</label>
+				<div class="runtime-field">
+					<input
+						id="rs-extra"
+						type="text"
+						name="yt_dlp_extra_args"
+						class="runtime-input"
+						value={ rtSettings["yt_dlp_extra_args"] }
+						placeholder={ rtDefaults["yt_dlp_extra_args"] }
+					/>
+					<span class="settings-hint">Например: <code>--sponsorblock-remove all --sub-lang ru</code></span>
+				</div>
+				<label class="runtime-label" for="rs-format">Формат вывода</label>
+				<div class="runtime-field">
+					<input
+						id="rs-format"
+						type="text"
+						name="yt_dlp_output_format"
+						class="runtime-input"
+						value={ rtSettings["yt_dlp_output_format"] }
+						placeholder={ rtDefaults["yt_dlp_output_format"] }
+					/>
+					<span class="settings-hint">mp4, mkv, webm и т.д.</span>
+				</div>
+				<label class="runtime-label" for="rs-maxfiles">Лимит файлов в плейлисте</label>
+				<div class="runtime-field">
+					<input
+						id="rs-maxfiles"
+						type="number"
+						name="yt_dlp_max_files"
+						class="runtime-input runtime-input-narrow"
+						value={ rtSettings["yt_dlp_max_files"] }
+						placeholder={ rtDefaults["yt_dlp_max_files"] }
+						min="0"
+					/>
+					<span class="settings-hint">0 — без лимита</span>
+				</div>
+				<label class="runtime-label" for="rs-timeout">Таймаут загрузки (с)</label>
+				<div class="runtime-field">
+					<input
+						id="rs-timeout"
+						type="number"
+						name="yt_dlp_timeout"
+						class="runtime-input runtime-input-narrow"
+						value={ rtSettings["yt_dlp_timeout"] }
+						placeholder={ rtDefaults["yt_dlp_timeout"] }
+						min="30"
+					/>
+					<span class="settings-hint">Секунды; по умолчанию 300</span>
+				</div>
+			</div>
+			<div class="settings-actions">
+				<button type="submit" class="m3-btn m3-btn-filled">
+					<span class="m3-icon">save</span>
+					Сохранить
+				</button>
+			</div>
+		</form>
 	</section>
 }
 

@@ -6,11 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
-	"time"
 
 	"github.com/dr-duke/talmorGo/internal/config"
-	"github.com/dr-duke/talmorGo/internal/downloader"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
@@ -27,6 +24,7 @@ type QueueHandler struct {
 	Tags     repo.TagRepo
 	Pool     Enqueuer
 	Cfg      *config.Config
+	Settings repo.SettingsRepo
 	Expander *playlist.Expander
 }
 
@@ -71,17 +69,7 @@ func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("HX-Trigger", "mediaRefresh")
 	w.WriteHeader(http.StatusNoContent)
 
-	cf := h.Cfg.CookiesFilePath()
-	if _, err := os.Stat(cf); err != nil {
-		cf = ""
-	}
-	opts := downloader.Options{
-		Binary:      h.Cfg.YtDlpBinary,
-		Proxy:       h.Cfg.YtDlpProxy,
-		MaxFiles:    h.Cfg.YtDlpMaxFilesPerRequest,
-		Timeout:     time.Duration(h.Cfg.YtDlpTimeout) * time.Second,
-		CookiesFile: cf,
-	}
+	opts := resolveExpanderOpts(r.Context(), h.Cfg, h.Settings)
 	// Асинхронно проверяем плейлист и сигналим воркеру; placeholder в статусе checking.
 	go func(id string) {
 		h.Expander.ResolvePlaceholder(context.Background(), id, rawURL, opts, "web", 0)
