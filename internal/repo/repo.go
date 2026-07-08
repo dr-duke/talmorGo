@@ -10,12 +10,25 @@ type JobFilter struct {
 	Statuses []model.JobStatus
 }
 
+type CollectionRepo interface {
+	List(ctx context.Context) ([]*model.Collection, error)
+	Create(ctx context.Context, name string) (*model.Collection, error)
+	Delete(ctx context.Context, id string) error
+	Rename(ctx context.Context, id, name string) error
+	// AddJobs добавляет набор job_id в коллекцию (INSERT OR IGNORE).
+	AddJobs(ctx context.Context, collectionID string, jobIDs []string) error
+	// RemoveJob убирает одно задание из коллекции.
+	RemoveJob(ctx context.Context, collectionID, jobID string) error
+}
+
 type JobRepo interface {
 	Create(ctx context.Context, job *model.Job) error
 	GetByID(ctx context.Context, id string) (*model.Job, error)
 	List(ctx context.Context, f JobFilter) ([]*model.Job, error)
 	// ListMedia возвращает объединённое представление заданий + файлов + тегов.
 	ListMedia(ctx context.Context) ([]*model.MediaItem, error)
+	// FilterMedia — серверная фильтрация: текстовый поиск + AND-теги + коллекция.
+	FilterMedia(ctx context.Context, f model.MediaFilter) ([]*model.MediaItem, error)
 	// SearchMedia ищет по имени файла, URL, домену и тегам (LIKE).
 	SearchMedia(ctx context.Context, query string) ([]*model.MediaItem, error)
 	// LastMedia возвращает последние n успешно скачанных доступных файлов.
@@ -77,7 +90,11 @@ type TokenRepo interface {
 type TagRepo interface {
 	Upsert(ctx context.Context, name string) (*model.Tag, error)
 	ListAll(ctx context.Context) ([]*model.Tag, error)
+	// ListWithCount возвращает все теги с количеством привязанных заданий (для облака тегов).
+	ListWithCount(ctx context.Context) ([]*model.TagWithCount, error)
 	AddToJob(ctx context.Context, jobID, tagID string) error
+	// BulkAddToJobs добавляет один тег сразу к набору заданий.
+	BulkAddToJobs(ctx context.Context, tagID string, jobIDs []string) error
 	RemoveFromJob(ctx context.Context, jobID, tagName string) error
 }
 

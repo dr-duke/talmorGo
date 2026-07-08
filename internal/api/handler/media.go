@@ -12,6 +12,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/audio"
 	"github.com/dr-duke/talmorGo/internal/config"
+	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/storage"
@@ -20,16 +21,17 @@ import (
 
 // MediaHandler обслуживает объединённый список файлов+очереди и операции над ними.
 type MediaHandler struct {
-	Jobs     repo.JobRepo
-	Files    repo.FileRepo
-	Tags     repo.TagRepo
-	Tokens   repo.TokenRepo
-	Storage  *storage.Storage
-	BaseURL  string
-	Pool     Enqueuer
-	Cfg      *config.Config
-	Settings repo.SettingsRepo
-	Expander *playlist.Expander
+	Jobs        repo.JobRepo
+	Files       repo.FileRepo
+	Tags        repo.TagRepo
+	Tokens      repo.TokenRepo
+	Storage     *storage.Storage
+	BaseURL     string
+	Pool        Enqueuer
+	Cfg         *config.Config
+	Settings    repo.SettingsRepo
+	Collections repo.CollectionRepo
+	Expander    *playlist.Expander
 }
 
 // Page — полная страница (tab switching).
@@ -39,19 +41,75 @@ func (h *MediaHandler) Page(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	tags, _ := h.Tags.ListAll(r.Context())
-	templ.Handler(templates.MediaTab(items, tags)).ServeHTTP(w, r)
+	tagCounts, _ := h.Tags.ListWithCount(r.Context())
+	collections, _ := h.Collections.List(r.Context())
+	templ.Handler(templates.MediaTab(items, tagCounts, collections)).ServeHTTP(w, r)
 }
 
-// List — фрагмент для HTMX polling.
+// List — фрагмент для HTMX: поддерживает серверную фильтрацию (?q=&tag=&collection=).
 func (h *MediaHandler) List(w http.ResponseWriter, r *http.Request) {
-	items, err := h.Jobs.ListMedia(r.Context())
+	f := parseMediaFilter(r)
+	items, err := h.Jobs.FilterMedia(r.Context(), f)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	tags, _ := h.Tags.ListAll(r.Context())
-	templ.Handler(templates.MediaList(items, tags)).ServeHTTP(w, r)
+	templ.Handler(templates.MediaList(items)).ServeHTTP(w, r)
+}
+
+// TagsFragment отдаёт HTML-фрагмент облака тегов для HTMX-refresh.
+func (h *MediaHandler) TagsFragment(w http.ResponseWriter, r *http.Request) {
+	tagCounts, err := h.Tags.ListWithCount(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	templ.Handler(templates.TagCloud(tagCounts)).ServeHTTP(w, r)
+}
+
+// BulkTag назначает тег набору заданий за одну операцию.
+func (h *MediaHandler) BulkTag(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TagName string   `json:"tag"`
+		JobIDs  []string `json:"job_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.TagName == "" || len(body.JobIDs) == 0 {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	tag, err := h.Tags.Upsert(r.Context(), body.TagName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := h.Tags.BulkAddToJobs(r.Context(), tag.ID, body.JobIDs); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// BulkHide скрывает набор заданий из основного интерфейса.
+func (h *MediaHandler) BulkHide(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		JobIDs []string `json:"job_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.JobIDs) == 0 {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	for _, id := range body.JobIDs {
+		h.Jobs.Hide(r.Context(), id) //nolint:errcheck
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func parseMediaFilter(r *http.Request) model.MediaFilter {
+	return model.MediaFilter{
+		Query:        r.URL.Query().Get("q"),
+		Tags:         r.URL.Query()["tag"],
+		CollectionID: r.URL.Query().Get("collection"),
+	}
 }
 
 // Stream отдаёт файл (с Range-поддержкой) если он доступен.

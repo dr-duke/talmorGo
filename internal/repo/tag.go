@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/google/uuid"
@@ -59,5 +60,44 @@ func (r *sqliteTagRepo) RemoveFromJob(ctx context.Context, jobID, tagName string
 	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM job_tags WHERE job_id=? AND tag_id=(SELECT id FROM tags WHERE name=?)`,
 		jobID, tagName)
+	return err
+}
+
+func (r *sqliteTagRepo) ListWithCount(ctx context.Context) ([]*model.TagWithCount, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT t.name, COUNT(jt.job_id) AS cnt
+		FROM tags t
+		LEFT JOIN job_tags jt ON jt.tag_id = t.id
+		GROUP BY t.id
+		ORDER BY cnt DESC, t.name ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.TagWithCount
+	for rows.Next() {
+		var tw model.TagWithCount
+		if err := rows.Scan(&tw.Name, &tw.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, &tw)
+	}
+	return out, rows.Err()
+}
+
+func (r *sqliteTagRepo) BulkAddToJobs(ctx context.Context, tagID string, jobIDs []string) error {
+	if len(jobIDs) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(jobIDs))
+	args := make([]any, 0, len(jobIDs)*2)
+	for i, id := range jobIDs {
+		placeholders[i] = "(?, ?)"
+		args = append(args, id, tagID)
+	}
+	_, err := r.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO job_tags (job_id, tag_id) VALUES `+strings.Join(placeholders, ","),
+		args...)
 	return err
 }

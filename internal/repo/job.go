@@ -153,6 +153,71 @@ func (r *sqliteJobRepo) SearchMedia(ctx context.Context, query string) ([]*model
 	return r.runMediaQuery(ctx, q, like, like, like, like, like, like, like)
 }
 
+// FilterMedia — серверная фильтрация: текстовый поиск + AND-теги + коллекция.
+// При пустом фильтре делегирует ListMedia.
+func (r *sqliteJobRepo) FilterMedia(ctx context.Context, f model.MediaFilter) ([]*model.MediaItem, error) {
+	if f.Query == "" && len(f.Tags) == 0 && f.CollectionID == "" {
+		return r.ListMedia(ctx)
+	}
+
+	var fileConds []string
+	var fileArgs []any
+	var jobConds []string
+	var jobArgs []any
+
+	if f.Query != "" {
+		like := "%" + f.Query + "%"
+		fileConds = append(fileConds, "(f.name LIKE ? OR j.url LIKE ? OR j.title LIKE ?)")
+		fileArgs = append(fileArgs, like, like, like)
+		jobConds = append(jobConds, "(j.url LIKE ? OR j.title LIKE ?)")
+		jobArgs = append(jobArgs, like, like)
+	}
+
+	for _, tag := range f.Tags {
+		sub := `j.id IN (SELECT jt.job_id FROM job_tags jt JOIN tags t ON t.id=jt.tag_id WHERE t.name=?)`
+		fileConds = append(fileConds, sub)
+		fileArgs = append(fileArgs, tag)
+		jobConds = append(jobConds, sub)
+		jobArgs = append(jobArgs, tag)
+	}
+
+	if f.CollectionID != "" {
+		sub := `j.id IN (SELECT job_id FROM collection_jobs WHERE collection_id=?)`
+		fileConds = append(fileConds, sub)
+		fileArgs = append(fileArgs, f.CollectionID)
+		jobConds = append(jobConds, sub)
+		jobArgs = append(jobArgs, f.CollectionID)
+	}
+
+	fileWhere := ""
+	if len(fileConds) > 0 {
+		fileWhere = " WHERE " + strings.Join(fileConds, " AND ")
+	}
+	jobAnd := ""
+	if len(jobConds) > 0 {
+		jobAnd = " AND " + strings.Join(jobConds, " AND ")
+	}
+
+	q := mediaRowSQL + `
+		FROM files f
+		JOIN jobs j ON j.id = f.job_id
+		` + fileWhere + `
+
+		UNION ALL
+
+		` + mediaRowSQL + `
+		FROM jobs j
+		LEFT JOIN files f ON f.id = NULL
+		WHERE j.status IN ('checking','pending','running','retrying','failed','cancelled')
+		  AND NOT EXISTS (SELECT 1 FROM files WHERE job_id = j.id)
+		` + jobAnd + `
+
+		ORDER BY sort_ts DESC
+	`
+	allArgs := append(fileArgs, jobArgs...)
+	return r.runMediaQuery(ctx, q, allArgs...)
+}
+
 // LastMedia возвращает последние n скачанных доступных файлов.
 func (r *sqliteJobRepo) LastMedia(ctx context.Context, n int) ([]*model.MediaItem, error) {
 	q := mediaRowSQL + `
@@ -424,7 +489,7 @@ func (r *sqliteJobRepo) CleanupDead(ctx context.Context) (int, error) {
 	}
 	// Удаляем привязки тегов.
 	if _, err := r.db.ExecContext(ctx, `
-		DELETE FROM tags_jobs WHERE job_id IN (
+		DELETE FROM job_tags WHERE job_id IN (
 			SELECT id FROM jobs WHERE hidden=1 OR status='failed'
 		)`); err != nil {
 		return 0, err

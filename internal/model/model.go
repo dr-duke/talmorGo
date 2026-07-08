@@ -134,6 +134,27 @@ type Tag struct {
 	Name string
 }
 
+// Collection — именованный набор видео.
+type Collection struct {
+	ID        string
+	Name      string
+	CreatedAt time.Time
+	JobCount  int // заполняется репозиторием
+}
+
+// TagWithCount — тег с количеством привязанных заданий (для облака тегов).
+type TagWithCount struct {
+	Name  string
+	Count int
+}
+
+// MediaFilter — параметры серверной фильтрации медиатеки.
+type MediaFilter struct {
+	Query        string   // текстовый поиск (имя файла, URL, заголовок)
+	Tags         []string // AND-пересечение тегов
+	CollectionID string   // только задания из коллекции; пусто — все
+}
+
 // CookieRecord — куки одного домена (Netscape-формат), хранимые в БД.
 type CookieRecord struct {
 	Domain    string

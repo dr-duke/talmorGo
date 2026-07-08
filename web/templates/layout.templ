@@ -189,7 +189,7 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 				}
 				.media-row {
 					display: grid;
-					grid-template-columns: 1fr auto;
+					grid-template-columns: 24px 1fr auto;
 					gap: .75rem; align-items: center;
 					background: var(--m3-surface);
 					border: 1px solid var(--m3-outline-var);
@@ -197,6 +197,10 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 					padding: .75rem 1rem;
 					transition: background .15s;
 				}
+				.row-select { display: flex; align-items: center; flex-shrink: 0; }
+				.row-checkbox { width: 16px; height: 16px; cursor: pointer; accent-color: var(--m3-primary); }
+				/* Подсветка выбранной строки */
+				.media-row:has(.row-checkbox:checked) { background: rgba(202,192,255,.08); border-color: var(--m3-primary); }
 				.media-row:hover { background: var(--m3-surface-var); }
 				.media-row.status-running  { border-left: 3px solid var(--c-active-fg); }
 				.media-row.status-retrying { border-left: 3px solid var(--c-warn-fg); }
@@ -407,12 +411,60 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 				.cookie-domain-name { font-weight: 500; font-size: .9rem; flex: 1; }
 				.cookie-domain-meta { font-size: .75rem; color: var(--m3-on-surface-var); }
 
+				/* ── Tag cloud count badge ── */
+				.chip-count { font-size: .7rem; opacity: .65; margin-left: .15rem; }
+
+				/* ── Collection chips row ── */
+				.collection-chips-row { display: flex; flex-wrap: wrap; gap: .35rem; width: 100%; margin-top: .25rem; }
+				.coll-chip-wrap { display: inline-flex; align-items: center; gap: 2px; }
+				.coll-chip-actions { display: none; gap: 2px; }
+				.coll-chip-wrap:hover .coll-chip-actions { display: inline-flex; }
+				.coll-chip-action {
+					width: 20px; height: 20px; border-radius: 4px;
+					display: flex; align-items: center; justify-content: center;
+					background: transparent; border: none; cursor: pointer;
+					color: var(--m3-on-surface-var);
+				}
+				.coll-chip-action:hover { background: var(--m3-surface-var); color: var(--m3-on-surface); }
+				.coll-chip-action.danger:hover { color: var(--m3-error); }
+
+				/* ── Action bar (bulk operations) ── */
+				.action-bar {
+					position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+					background: var(--m3-surface-hi); border: 1px solid var(--m3-outline);
+					border-radius: 16px; padding: .6rem 1rem;
+					display: flex; gap: .5rem; align-items: center;
+					box-shadow: 0 4px 24px rgba(0,0,0,.45); z-index: 90;
+					max-width: calc(100vw - 2rem);
+				}
+				.action-bar.hidden { display: none; }
+				.action-bar-count { font-size: .85rem; color: var(--m3-on-surface-var); white-space: nowrap; margin-right: .25rem; }
+				.m3-btn-sm {
+					display: inline-flex; align-items: center; gap: .3rem;
+					border: none; border-radius: 9999px; cursor: pointer;
+					font-size: .8rem; font-weight: 500; padding: .35rem .85rem;
+					background: var(--m3-surface-var); color: var(--m3-on-surface);
+					white-space: nowrap; transition: background .15s;
+				}
+				.m3-btn-sm:hover { background: var(--m3-outline-var); }
+				.m3-btn-sm .m3-icon { font-size: 16px; }
+				/* Collection dropdown */
+				.coll-dropdown-wrap { position: relative; }
+				.coll-dropdown {
+					position: absolute; bottom: calc(100% + 8px); left: 0;
+					min-width: 200px; max-height: 240px; overflow-y: auto;
+					background: var(--m3-surface-hi); border: 1px solid var(--m3-outline-var);
+					border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.4);
+					z-index: 100; padding: .35rem;
+				}
+				.coll-dropdown.hidden { display: none; }
+
 				/* ── Mobile ── */
 				@media (max-width: 600px) {
 					header { padding: .75rem; }
 					#content { padding: .75rem; }
 					.media-row {
-						grid-template-columns: 1fr auto;
+						grid-template-columns: 24px 1fr auto;
 					}
 					.title-text {
 						white-space: normal;
@@ -519,7 +571,7 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 						headers: {'Content-Type': 'application/json'},
 						body: JSON.stringify({name: newName}),
 					}).then(function() {
-						htmx.ajax('GET', 'media/list', {target: '#media-inner', swap: 'outerHTML'});
+						document.body.dispatchEvent(new CustomEvent('mediaRefresh'));
 					});
 				}
 				function renamePrompt(id, name) {
@@ -563,13 +615,16 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 						headers: {'Content-Type': 'application/json'},
 						body: JSON.stringify({name: n.trim()}),
 					}).then(function() {
-						htmx.ajax('GET', 'media/list', {target: '#media-inner', swap: 'outerHTML'});
+						document.body.dispatchEvent(new CustomEvent('mediaRefresh'));
+						document.body.dispatchEvent(new CustomEvent('tagsRefresh'));
 					});
 				}
 
-				// ── Client-side filtering ──
-				var _activeTag = null;
-
+				// ── Filter state ──
+				var _activeTags = new Set();   // user-defined tags (server-side AND intersection)
+				var _activeStatus = null;       // status filter (client-side only)
+				var _activeCollection = '';     // collection ID (server-side)
+				var _archivedStatus = {failed:1, cancelled:1, deleted:1, missing:1, hidden:1};
 				var _statusLabels = {
 					'checking':'проверка…','pending':'ожидание','running':'скачивается',
 					'retrying':'повтор','done':'готово','failed':'ошибка',
@@ -577,63 +632,109 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 					'hidden':'скрытые','imported':'импортированы'
 				};
 
-				// Активировать статус-фильтр (вызывается из чипа внутри строки).
-				function activateStatusFilter(tag) {
-					var existing = document.querySelector('#status-chips [data-tag="' + tag + '"]');
-					if (existing) { toggleTagFilter(existing); } else { setActiveTag(tag); applyFilters(); }
+				function updateFilterForm() {
+					var q = (document.getElementById('media-search') || {}).value || '';
+					var fq = document.getElementById('filter-q');
+					var fc = document.getElementById('filter-collection');
+					if (fq) fq.value = q;
+					if (fc) fc.value = _activeCollection;
+					// Remove existing tag inputs, re-add
+					var form = document.getElementById('filter-form');
+					if (!form) return;
+					form.querySelectorAll('input[name="tag"]').forEach(function(el){ el.remove(); });
+					_activeTags.forEach(function(tag) {
+						var inp = document.createElement('input');
+						inp.type = 'hidden'; inp.name = 'tag'; inp.value = tag;
+						form.appendChild(inp);
+					});
 				}
 
-				function toggleTagFilter(btn) {
+				function triggerServerFilter() {
+					updateFilterForm();
+					// Dispatching mediaRefresh causes #media-inner (which has hx-include="#filter-form")
+					// to re-fetch with current filter values as query params.
+					document.body.dispatchEvent(new CustomEvent('mediaRefresh'));
+				}
+
+				// Пользовательский тег — multi-select, server-side AND.
+				function toggleUserTag(btn) {
 					var tag = btn.dataset.tag;
-					if (_activeTag === tag) {
-						setActiveTag(null);
+					if (_activeTags.has(tag)) {
+						_activeTags.delete(tag);
+						btn.classList.remove('active');
 					} else {
-						setActiveTag(tag);
+						_activeTags.add(tag);
+						btn.classList.add('active');
 					}
+					triggerServerFilter();
 					applyFilters();
 				}
 
-				function setActiveTag(tag) {
-					_activeTag = tag;
-					// Снимаем active со всех фильтр-чипов.
-					document.querySelectorAll('.tag-filter-row .m3-chip, #status-chips .m3-chip').forEach(function(b) {
-						b.classList.toggle('active', b.dataset.tag === tag);
+				// Фильтр по статусу — single-select, client-side only.
+				function toggleTagFilter(btn) {
+					var tag = btn.dataset.tag;
+					if (_activeStatus === tag) {
+						_activeStatus = null;
+					} else {
+						_activeStatus = tag;
+					}
+					document.querySelectorAll('#status-chips .m3-chip').forEach(function(b) {
+						b.classList.toggle('active', b.dataset.tag === _activeStatus);
 					});
+					applyFilters();
 				}
 
-				// Статусы, которые не показываются на главной по умолчанию (не захламляют),
-				// но доступны кликом по соответствующему чипу статуса.
-				var _archivedStatus = {failed:1, cancelled:1, deleted:1, missing:1, hidden:1};
+				function activateStatusFilter(tag) {
+					var existing = document.querySelector('#status-chips [data-tag="' + tag + '"]');
+					if (existing) { toggleTagFilter(existing); } else {
+						_activeStatus = (_activeStatus === tag) ? null : tag;
+						applyFilters();
+					}
+				}
+
+				// Фильтр по коллекции.
+				function filterByCollection(btn) {
+					var id = (typeof btn === 'string') ? btn : (btn.dataset.collectionId || '');
+					_activeCollection = id;
+					document.querySelectorAll('#collection-chips .m3-chip-collection').forEach(function(b) {
+						b.classList.toggle('active', (b.dataset.collectionId || '') === id);
+					});
+					triggerServerFilter();
+				}
 
 				function applyFilters() {
 					var q = (document.getElementById('media-search') || {value:''}).value.toLowerCase();
+					var serverActive = _activeTags.size > 0 || !!_activeCollection;
 					document.querySelectorAll('.media-row').forEach(function(row) {
-						var text = (row.dataset.title + ' ' + row.dataset.url + ' ' + row.dataset.domain).toLowerCase();
+						var text = ((row.dataset.title||'')+' '+(row.dataset.url||'')+' '+(row.dataset.domain||'')).toLowerCase();
 						var tags = (row.dataset.tags || '').split(',');
 						var status = tags[0];
 						var matchSearch = !q || text.includes(q) || tags.some(function(t){ return t.toLowerCase().includes(q); });
-
-						if (!_activeTag) {
-							// Главная: прячем архивные статусы (ошибки, отменённые, удалённые, скрытые).
+						var matchStatus = !_activeStatus || tags.indexOf(_activeStatus) >= 0;
+						if (!serverActive && !_activeStatus) {
 							row.style.display = (!_archivedStatus[status] && matchSearch) ? '' : 'none';
-							return;
+						} else {
+							row.style.display = (matchSearch && matchStatus) ? '' : 'none';
 						}
-						// Активен фильтр (чип статуса или пользовательский тег): показываем совпадения.
-						var matchTag = tags.indexOf(_activeTag) >= 0;
-						row.style.display = (matchSearch && matchTag) ? '' : 'none';
 					});
 				}
 
-				// Строим чипы статусов из текущих данных.
+				var _searchDebounce;
+				function onSearchInput(input) {
+					var fq = document.getElementById('filter-q');
+					if (fq) fq.value = input.value;
+					applyFilters();
+					clearTimeout(_searchDebounce);
+					_searchDebounce = setTimeout(triggerServerFilter, 400);
+				}
+
 				function rebuildStatusChips() {
 					var seen = {}, order = [];
 					document.querySelectorAll('.media-row').forEach(function(row) {
 						var s = (row.dataset.tags || '').split(',')[0];
 						if (s && !seen[s]) { seen[s] = true; order.push(s); }
 					});
-					// «скрытые» всегда последним.
 					if (!seen['hidden']) order.push('hidden');
-
 					var container = document.getElementById('status-chips');
 					if (!container) return;
 					container.innerHTML = '';
@@ -642,23 +743,204 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 						btn.className = 'm3-chip' + (s === 'hidden' ? ' m3-chip-hidden' : '');
 						btn.dataset.tag = s;
 						btn.textContent = _statusLabels[s] || s;
-						if (_activeTag === s) btn.classList.add('active');
+						if (_activeStatus === s) btn.classList.add('active');
 						btn.addEventListener('click', function() { toggleTagFilter(this); });
 						container.appendChild(btn);
 					});
 				}
 
-				// Переприменяем фильтр и пересобираем чипы после HTMX-обновления.
+				// ── Multi-select ──
+				var _selectedIds = new Set();
+
+				function onRowSelect(checkbox) {
+					if (checkbox.checked) { _selectedIds.add(checkbox.value); }
+					else { _selectedIds.delete(checkbox.value); }
+					updateActionBar();
+				}
+
+				function clearSelection() {
+					_selectedIds.clear();
+					document.querySelectorAll('.row-checkbox').forEach(function(cb){ cb.checked = false; });
+					updateActionBar();
+				}
+
+				function updateActionBar() {
+					var bar = document.getElementById('action-bar');
+					if (!bar) return;
+					var n = _selectedIds.size;
+					if (n === 0) { bar.classList.add('hidden'); return; }
+					bar.classList.remove('hidden');
+					var el = document.getElementById('select-count');
+					if (el) el.textContent = n + ' выбрано';
+				}
+
+				function bulkTag() {
+					var n = prompt('Тег для выбранных элементов:');
+					if (!n || !n.trim() || _selectedIds.size === 0) return;
+					fetch('media/bulk-tag', {
+						method: 'POST',
+						headers: {'Content-Type': 'application/json'},
+						body: JSON.stringify({tag: n.trim(), job_ids: [..._selectedIds]}),
+					}).then(function(r) {
+						if (r.ok) {
+							clearSelection();
+							document.body.dispatchEvent(new CustomEvent('mediaRefresh'));
+							document.body.dispatchEvent(new CustomEvent('tagsRefresh'));
+						}
+					});
+				}
+
+				function bulkHide() {
+					if (_selectedIds.size === 0) return;
+					if (!confirm('Скрыть ' + _selectedIds.size + ' элемент(ов)?')) return;
+					fetch('media/bulk-hide', {
+						method: 'POST',
+						headers: {'Content-Type': 'application/json'},
+						body: JSON.stringify({job_ids: [..._selectedIds]}),
+					}).then(function(r) {
+						if (r.ok) {
+							clearSelection();
+							document.body.dispatchEvent(new CustomEvent('mediaRefresh'));
+						}
+					});
+				}
+
+				function toggleCollectionDropdown() {
+					var dropdown = document.getElementById('collection-dropdown');
+					if (!dropdown) return;
+					if (!dropdown.classList.contains('hidden')) { dropdown.classList.add('hidden'); return; }
+					// Populate from collection chips in DOM
+					var chips = document.querySelectorAll('#collection-chips .m3-chip-collection[data-collection-id]:not([data-collection-id=""])');
+					dropdown.innerHTML = '';
+					chips.forEach(function(chip) {
+						var btn = document.createElement('button');
+						btn.className = 'row-menu-item';
+						// Get chip text without the count badge
+						var name = chip.childNodes[0] ? chip.childNodes[0].textContent.trim() : chip.textContent.trim();
+						btn.textContent = name;
+						var colId = chip.dataset.collectionId;
+						btn.onclick = function() {
+							dropdown.classList.add('hidden');
+							bulkAddToCollection(colId);
+						};
+						dropdown.appendChild(btn);
+					});
+					if (chips.length === 0) {
+						var msg = document.createElement('div');
+						msg.style.cssText = 'padding:.5rem .6rem;font-size:.85rem;color:var(--m3-on-surface-var)';
+						msg.textContent = 'Нет коллекций';
+						dropdown.appendChild(msg);
+					}
+					var createBtn = document.createElement('button');
+					createBtn.className = 'row-menu-item';
+					createBtn.innerHTML = '<span class="m3-icon" style="font-size:16px">add</span>Новая коллекция';
+					createBtn.onclick = function() {
+						dropdown.classList.add('hidden');
+						createCollectionAndAdd();
+					};
+					dropdown.appendChild(createBtn);
+					dropdown.classList.remove('hidden');
+				}
+
+				function bulkAddToCollection(collectionId) {
+					if (_selectedIds.size === 0) return;
+					fetch('collections/' + collectionId + '/jobs', {
+						method: 'POST',
+						headers: {'Content-Type': 'application/json'},
+						body: JSON.stringify({job_ids: [..._selectedIds]}),
+					}).then(function(r) {
+						if (r.ok) {
+							clearSelection();
+							document.body.dispatchEvent(new CustomEvent('collectionsRefresh'));
+						}
+					});
+				}
+
+				// ── Collections management ──
+				function createCollection() {
+					var name = prompt('Название новой коллекции:');
+					if (!name || !name.trim()) return;
+					fetch('collections', {
+						method: 'POST',
+						headers: {'Content-Type': 'application/json'},
+						body: JSON.stringify({name: name.trim()}),
+					}).then(function(r) {
+						if (r.ok) document.body.dispatchEvent(new CustomEvent('collectionsRefresh'));
+					});
+				}
+
+				function createCollectionAndAdd() {
+					var name = prompt('Название новой коллекции:');
+					if (!name || !name.trim() || _selectedIds.size === 0) return;
+					var ids = [..._selectedIds];
+					fetch('collections', {
+						method: 'POST',
+						headers: {'Content-Type': 'application/json'},
+						body: JSON.stringify({name: name.trim()}),
+					}).then(function(r) { return r.json(); })
+					.then(function(col) {
+						return fetch('collections/' + col.id + '/jobs', {
+							method: 'POST',
+							headers: {'Content-Type': 'application/json'},
+							body: JSON.stringify({job_ids: ids}),
+						});
+					}).then(function(r) {
+						if (r.ok) {
+							clearSelection();
+							document.body.dispatchEvent(new CustomEvent('collectionsRefresh'));
+						}
+					});
+				}
+
+				function renameCollection(id, currentName) {
+					var name = prompt('Новое название:', currentName);
+					if (!name || !name.trim() || name.trim() === currentName) return;
+					fetch('collections/' + id, {
+						method: 'PATCH',
+						headers: {'Content-Type': 'application/json'},
+						body: JSON.stringify({name: name.trim()}),
+					}).then(function(r) {
+						if (r.ok) document.body.dispatchEvent(new CustomEvent('collectionsRefresh'));
+					});
+				}
+
+				function deleteCollection(id) {
+					if (!confirm('Удалить коллекцию? Видео останутся.')) return;
+					fetch('collections/' + id, {method: 'DELETE'}).then(function(r) {
+						if (r.ok) {
+							if (_activeCollection === id) filterByCollection('');
+							document.body.dispatchEvent(new CustomEvent('collectionsRefresh'));
+						}
+					});
+				}
+
+				// Клик строки открывает плеер только если не кликнули чекбокс/кнопку.
+				function rowClick(event, row) {
+					if (event.target.closest('.row-select,.media-actions')) return;
+					var stream = row.dataset.stream;
+					if (stream) openPlayer(stream, row.dataset.title);
+				}
+
+				// После HTMX-обновления #media-inner — сбрасываем выделение, пересобираем чипы.
 				document.body.addEventListener('htmx:afterSwap', function(e) {
 					if (e.detail.target && e.detail.target.id === 'media-inner') {
+						clearSelection();
 						rebuildStatusChips();
 						applyFilters();
 					}
 				});
-				// Первый запуск.
 				document.addEventListener('DOMContentLoaded', function() {
 					rebuildStatusChips();
 					applyFilters();
+				});
+
+				// Закрываем collection-dropdown по клику вне него.
+				document.addEventListener('click', function(e) {
+					var wrap = document.querySelector('.coll-dropdown-wrap');
+					if (wrap && !wrap.contains(e.target)) {
+						var dd = document.getElementById('collection-dropdown');
+						if (dd) dd.classList.add('hidden');
+					}
 				});
 
 				// ── SSE: обновление списка без polling ──

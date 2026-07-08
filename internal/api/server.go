@@ -30,6 +30,7 @@ func New(
 	tags repo.TagRepo,
 	cookies repo.CookieRepo,
 	settings repo.SettingsRepo,
+	collections repo.CollectionRepo,
 	store *storage.Storage,
 	pool handler.Enqueuer,
 	hub *sse.Hub,
@@ -46,8 +47,10 @@ func New(
 	mh := &handler.MediaHandler{
 		Jobs: jobs, Files: files, Tags: tags,
 		Tokens: tokens, Storage: store,
-		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg, Settings: settings, Expander: expander,
+		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg, Settings: settings,
+		Collections: collections, Expander: expander,
 	}
+	ch := &handler.CollectionHandler{Collections: collections}
 	lh := &handler.LinkHandler{Tokens: tokens, Files: files}
 	sh := &handler.SettingsHandler{Cookies: cookies, Settings: settings, Jobs: jobs, Files: files, Storage: store, Cfg: cfg, SiteName: siteName}
 
@@ -80,6 +83,16 @@ func New(
 	mux.HandleFunc("DELETE /jobs/{id}/tags/{tag}", mh.RemoveTag)
 	mux.HandleFunc("GET /jobs/{id}/log", mh.Log)
 	mux.HandleFunc("POST /files/{id}/extract-audio", mh.ExtractAudio)
+	mux.HandleFunc("GET /media/tags", mh.TagsFragment)
+	mux.HandleFunc("POST /media/bulk-tag", mh.BulkTag)
+	mux.HandleFunc("POST /media/bulk-hide", mh.BulkHide)
+
+	// Коллекции.
+	mux.HandleFunc("GET /collections", ch.Fragment)
+	mux.HandleFunc("POST /collections", ch.Create)
+	mux.HandleFunc("PATCH /collections/{id}", ch.Rename)
+	mux.HandleFunc("DELETE /collections/{id}", ch.Delete)
+	mux.HandleFunc("POST /collections/{id}/jobs", ch.AddJobs)
 
 	// Очередь — добавление и управление.
 	mux.HandleFunc("POST /queue", qh.Add)
