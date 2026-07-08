@@ -2,6 +2,8 @@ package model
 
 import (
 	"net/url"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -67,6 +69,14 @@ func (f *File) IsLost() bool    { return f.LostAt != nil }
 func (f *File) IsDeleted() bool { return f.DeletedAt != nil }
 func (f *File) IsAvailable() bool {
 	return f.DeletedAt == nil && f.LostAt == nil
+}
+
+func (f *File) IsVideo() bool {
+	switch strings.ToLower(filepath.Ext(f.Name)) {
+	case ".mp4", ".mkv", ".webm", ".avi", ".mov", ".ts", ".m4v", ".wmv":
+		return true
+	}
+	return false
 }
 
 // MediaItem — объединённое представление задания и (опционально) файла.

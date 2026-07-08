@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 
 	"github.com/a-h/templ"
+	"github.com/dr-duke/talmorGo/internal/audio"
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
@@ -267,4 +270,30 @@ func (h *MediaHandler) ListDeleted(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(files) //nolint:errcheck
+}
+
+// ExtractAudio извлекает аудиодорожку из уже скачанного файла в папку audio.
+func (h *MediaHandler) ExtractAudio(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	f, err := h.Files.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+	if !f.IsAvailable() {
+		http.Error(w, "file not available", http.StatusGone)
+		return
+	}
+
+	audioDir := h.Cfg.AudioDir()
+	outPath, err := audio.Extract(r.Context(), h.Cfg.FfmpegBinary, f.Path, audioDir)
+	if err != nil {
+		slog.Error("extract audio", "file_id", id, "err", err)
+		http.Error(w, "audio extraction failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	slog.Info("audio extracted", "src", f.Path, "dst", outPath)
+	w.Header().Set("HX-Trigger", fmt.Sprintf(`{"showToast":"%s"}`, filepath.Base(outPath)))
+	w.WriteHeader(http.StatusNoContent)
 }

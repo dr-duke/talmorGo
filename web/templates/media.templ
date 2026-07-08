@@ -232,6 +232,14 @@ templ mediaRow(item *model.MediaItem) {
 							title="Скачать повторно"
 						><span class="m3-icon">refresh</span>Скачать повторно</button>
 					}
+					if rowAvailable(item) && item.File.IsVideo() {
+						<button
+							class="row-menu-item"
+							hx-post={ fmt.Sprintf("files/%s/extract-audio", item.File.ID) }
+							hx-swap="none"
+							title="Извлечь аудиодорожку в папку audio"
+						><span class="m3-icon">audio_file</span>Извлечь аудио</button>
+					}
 					if rowAvailable(item) {
 						<div class="row-menu-divider"></div>
 						<button

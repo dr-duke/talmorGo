@@ -352,6 +352,17 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 				.settings-empty { font-size: .875rem; color: var(--m3-on-surface-var); }
 				.settings-actions { display: flex; gap: .75rem; margin-top: .75rem; }
 				.cleanup-result { font-size: .875rem; color: var(--m3-on-surface-var); margin-top: .75rem; }
+				/* ── Toast ── */
+				#toast {
+					position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%) translateY(120%);
+					background: var(--m3-on-surface); color: var(--m3-surface);
+					padding: .65rem 1.25rem; border-radius: 8px;
+					font-size: .875rem; white-space: nowrap;
+					box-shadow: 0 4px 12px rgba(0,0,0,.25);
+					transition: transform .25s ease, opacity .25s ease;
+					opacity: 0; pointer-events: none; z-index: 9999;
+				}
+				#toast.visible { transform: translateX(-50%) translateY(0); opacity: 1; }
 				.runtime-settings-form { display: flex; flex-direction: column; gap: 0; }
 				.runtime-settings-grid {
 					display: grid;
@@ -665,7 +676,24 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 					}
 					connect();
 				})();
+
+				// ── Toast ──
+				(function() {
+					var toastTimer;
+					function showToast(msg) {
+						var el = document.getElementById('toast');
+						if (!el) return;
+						el.textContent = msg;
+						el.classList.add('visible');
+						clearTimeout(toastTimer);
+						toastTimer = setTimeout(function() { el.classList.remove('visible'); }, 3500);
+					}
+					document.body.addEventListener('showToast', function(e) {
+						showToast(e.detail && e.detail.value ? e.detail.value : 'Готово');
+					});
+				})();
 			</script>
+			<div id="toast"></div>
 		</body>
 	</html>
 }

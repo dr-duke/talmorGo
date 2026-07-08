@@ -53,6 +53,10 @@ type Config struct {
 
 	// Сканирование директории скачивания (секунды между сканами, 0 — выключено)
 	DirScanInterval int `long:"dir-scan-interval" env:"DIR_SCAN_INTERVAL" default:"0"`
+
+	// Извлечение аудио
+	FfmpegBinary   string `long:"ffmpeg-binary" env:"FFMPEG_BINARY" default:"ffmpeg"`
+	AudioOutputDir string `long:"audio-output-dir" env:"AUDIO_OUTPUT_DIR" default:""`
 }
 
 // LinkBase возвращает корень для построения публичных ссылок: BASE_URL + BASE_PATH.
@@ -72,6 +76,14 @@ func (c *Config) StagingDir() string {
 		return c.YtDlpStagingDir
 	}
 	return filepath.Join(c.YtDlpOutputDir, ".talmor-tmp")
+}
+
+// AudioDir — каталог для аудиодорожек. По умолчанию — поддиректория OutputDir.
+func (c *Config) AudioDir() string {
+	if c.AudioOutputDir != "" {
+		return c.AudioOutputDir
+	}
+	return filepath.Join(c.YtDlpOutputDir, "audio")
 }
 
 // CookiesFilePath — путь к объединённому Netscape-файлу кук в зоне OutputDir.
