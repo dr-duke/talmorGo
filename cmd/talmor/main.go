@@ -54,12 +54,17 @@ func main() {
 	pool.SetHub(hub)
 	pool.SetSettingsRepo(settingsRepo)
 
-	tgBot, err := bot.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, pool)
-	if err != nil {
-		slog.Error("bot init", "err", err)
-		os.Exit(1)
+	var tgBot *bot.Bot
+	if cfg.TelegramBotToken != "" {
+		tgBot, err = bot.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, pool)
+		if err != nil {
+			slog.Warn("bot init failed, running without telegram", "err", err)
+		} else {
+			pool.SetNotifier(tgBot)
+		}
+	} else {
+		slog.Info("TELEGRAM_BOT_TOKEN not set, running in web-only mode")
 	}
-	pool.SetNotifier(tgBot)
 
 	store := storage.New(cfg.YtDlpOutputDir)
 	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, settingsRepo, collectionRepo, store, pool, hub)
@@ -82,7 +87,9 @@ func main() {
 	}()
 
 	go pool.Start(ctx)
-	go tgBot.Start(ctx)
+	if tgBot != nil {
+		go tgBot.Start(ctx)
+	}
 	go checker.Start(ctx)
 	go dirScanner.Start(ctx)
 

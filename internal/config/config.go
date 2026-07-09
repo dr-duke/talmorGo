@@ -23,7 +23,7 @@ type Config struct {
 	WebToken       string `long:"web-token" env:"WEB_TOKEN"`
 
 	// Telegram bot
-	TelegramBotToken   string  `long:"telegram-bot-token" env:"TELEGRAM_BOT_TOKEN" required:"true"`
+	TelegramBotToken   string  `long:"telegram-bot-token" env:"TELEGRAM_BOT_TOKEN"`
 	TelegramAllowedIDs []int64 `long:"telegram-allowed-ids" env:"TELEGRAM_ALLOWED_IDS" env-delim:";"`
 	TelegramProxy      string  `long:"telegram-proxy" env:"TELEGRAM_PROXY"`
 	TelegramDebug      bool    `long:"telegram-debug" env:"TELEGRAM_DEBUG"`
