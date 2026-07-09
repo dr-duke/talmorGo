@@ -1,0 +1,148 @@
+package templates
+
+import (
+	"fmt"
+	"github.com/dr-duke/talmorGo/internal/model"
+)
+
+templ AudioList(files []*model.AudioFile) {
+	<div id="audio-inner">
+		if len(files) == 0 {
+			<div class="m3-empty">
+				<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">audio_file</span>
+				<p>Нет аудиофайлов</p>
+				<p style="font-size:.85rem;color:var(--m3-on-surface-var)">Используйте «Извлечь аудио» в меню видеофайла</p>
+			</div>
+		} else {
+			<div class="audio-list">
+				for _, af := range files {
+					@audioRow(af)
+				}
+			</div>
+		}
+	</div>
+}
+
+templ audioRow(af *model.AudioFile) {
+	<div class="audio-row" data-audio-id={ af.ID }>
+		<div class="audio-icon">
+			<span class="m3-icon" style="font-size:24px;color:var(--m3-primary)">audio_file</span>
+		</div>
+		<div class="audio-main">
+			<div class="audio-title">{ audioDisplayTitle(af) }</div>
+			<div class="audio-meta">
+				if af.Artist != "" {
+					<span class="audio-artist">{ af.Artist }</span>
+				}
+				if af.Album != "" {
+					<span class="audio-album">{ af.Album }</span>
+				}
+				<span class="audio-size">{ formatSize(af.Size) }</span>
+			</div>
+		</div>
+		<div class="audio-actions">
+			<button
+				class="m3-icon-btn"
+				data-stream={ fmt.Sprintf("audio/%s/stream", af.ID) }
+				data-title={ audioDisplayTitle(af) }
+				onclick="openAudioPlayer(this.dataset.stream, this.dataset.title)"
+				title="Слушать"
+			><span class="m3-icon">play_circle</span></button>
+			<button
+				class="m3-icon-btn"
+				data-audio-id={ af.ID }
+				data-title={ af.Title }
+				data-artist={ af.Artist }
+				data-album={ af.Album }
+				data-year={ af.Year }
+				data-genre={ af.Genre }
+				onclick="openMetaDialog(this)"
+				title="Редактировать метаданные"
+			><span class="m3-icon">edit</span></button>
+			<div class="row-menu-wrap">
+				<button class="m3-icon-btn" title="Ещё" onclick="toggleRowMenu(event, this)"><span class="m3-icon">more_vert</span></button>
+				<div class="row-menu">
+					<a
+						class="row-menu-item"
+						href={ templ.SafeURL(fmt.Sprintf("audio/%s/stream", af.ID)) }
+						target="_blank"
+					><span class="m3-icon">open_in_new</span>Открыть в новой вкладке</a>
+					<a
+						class="row-menu-item"
+						href={ templ.SafeURL(fmt.Sprintf("audio/%s/stream?download=true", af.ID)) }
+					><span class="m3-icon">download</span>Скачать</a>
+					<div class="row-menu-divider"></div>
+					<button
+						class="row-menu-item danger"
+						hx-delete={ fmt.Sprintf("audio/%s", af.ID) }
+						hx-swap="none"
+						hx-confirm="Удалить запись об аудиофайле?"
+					><span class="m3-icon">delete</span>Удалить запись</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+templ CollectionsCards(cols []*model.Collection) {
+	<div id="collections-inner">
+		<div class="collections-toolbar">
+			<button class="m3-btn m3-btn-filled" onclick="createCollection()">
+				<span class="m3-icon">create_new_folder</span>Новая коллекция
+			</button>
+		</div>
+		if len(cols) == 0 {
+			<div class="m3-empty">
+				<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">folder_open</span>
+				<p>Нет коллекций</p>
+				<p style="font-size:.85rem;color:var(--m3-on-surface-var)">Создайте коллекцию и добавляйте видео мультиселектом</p>
+			</div>
+		} else {
+			<div class="collection-grid">
+				for _, c := range cols {
+					@collectionCard(c)
+				}
+			</div>
+		}
+	</div>
+}
+
+templ collectionCard(c *model.Collection) {
+	<div class="coll-card">
+		<div class="coll-card-icon">
+			<span class="m3-icon" style="font-size:32px;color:var(--m3-primary)">folder</span>
+		</div>
+		<div class="coll-card-body">
+			<div class="coll-card-name">{ c.Name }</div>
+			<div class="coll-card-count">{ fmt.Sprintf("%d видео", c.JobCount) }</div>
+		</div>
+		<div class="coll-card-actions">
+			<button
+				class="m3-icon-btn"
+				data-collection-name={ c.Name }
+				onclick="switchToCollectionTag(this.dataset.collectionName)"
+				title="Показать видео"
+			><span class="m3-icon">play_circle</span></button>
+			<button
+				class="m3-icon-btn"
+				data-collection-id={ c.ID }
+				data-collection-name={ c.Name }
+				onclick="renameCollection(this.dataset.collectionId, this.dataset.collectionName)"
+				title="Переименовать"
+			><span class="m3-icon">edit</span></button>
+			<button
+				class="m3-icon-btn m3-icon-btn-danger"
+				data-collection-id={ c.ID }
+				onclick="deleteCollection(this.dataset.collectionId)"
+				title="Удалить коллекцию"
+			><span class="m3-icon">delete</span></button>
+		</div>
+	</div>
+}
+
+func audioDisplayTitle(af *model.AudioFile) string {
+	if af.Title != "" {
+		return af.Title
+	}
+	return af.Name
+}

@@ -47,6 +47,7 @@ func main() {
 	cookieRepo := repo.NewCookieRepo(database)
 	settingsRepo := repo.NewSettingsRepo(database)
 	collectionRepo := repo.NewCollectionRepo(database)
+	audioRepo := repo.NewAudioRepo(database)
 
 	hub := sse.New()
 
@@ -67,7 +68,7 @@ func main() {
 	}
 
 	store := storage.New(cfg.YtDlpOutputDir)
-	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, settingsRepo, collectionRepo, store, pool, hub)
+	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, settingsRepo, collectionRepo, audioRepo, store, pool, hub)
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPHost + ":" + cfg.HTTPPort,
 		Handler: srv.Handler(),

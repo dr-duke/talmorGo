@@ -153,10 +153,10 @@ func (r *sqliteJobRepo) SearchMedia(ctx context.Context, query string) ([]*model
 	return r.runMediaQuery(ctx, q, like, like, like, like, like, like, like)
 }
 
-// FilterMedia — серверная фильтрация: текстовый поиск + AND-теги + коллекция.
+// FilterMedia — серверная фильтрация: текстовый поиск + AND-теги (коллекции фильтруются через тег по имени).
 // При пустом фильтре делегирует ListMedia.
 func (r *sqliteJobRepo) FilterMedia(ctx context.Context, f model.MediaFilter) ([]*model.MediaItem, error) {
-	if f.Query == "" && len(f.Tags) == 0 && f.CollectionID == "" {
+	if f.Query == "" && len(f.Tags) == 0 {
 		return r.ListMedia(ctx)
 	}
 
@@ -179,14 +179,6 @@ func (r *sqliteJobRepo) FilterMedia(ctx context.Context, f model.MediaFilter) ([
 		fileArgs = append(fileArgs, tag)
 		jobConds = append(jobConds, sub)
 		jobArgs = append(jobArgs, tag)
-	}
-
-	if f.CollectionID != "" {
-		sub := `j.id IN (SELECT job_id FROM collection_jobs WHERE collection_id=?)`
-		fileConds = append(fileConds, sub)
-		fileArgs = append(fileArgs, f.CollectionID)
-		jobConds = append(jobConds, sub)
-		jobArgs = append(jobArgs, f.CollectionID)
 	}
 
 	fileWhere := ""

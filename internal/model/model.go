@@ -144,15 +144,36 @@ type Collection struct {
 
 // TagWithCount — тег с количеством привязанных заданий (для облака тегов).
 type TagWithCount struct {
-	Name  string
-	Count int
+	Name         string
+	Count        int
+	IsCollection bool // тег является именем коллекции
 }
 
 // MediaFilter — параметры серверной фильтрации медиатеки.
 type MediaFilter struct {
-	Query        string   // текстовый поиск (имя файла, URL, заголовок)
-	Tags         []string // AND-пересечение тегов
-	CollectionID string   // только задания из коллекции; пусто — все
+	Query string   // текстовый поиск (имя файла, URL, заголовок)
+	Tags  []string // AND-пересечение тегов (включая коллекции по имени)
+}
+
+// AudioMeta — ID3-метаданные аудиофайла.
+type AudioMeta struct {
+	Title  string
+	Artist string
+	Album  string
+	Year   string
+	Genre  string
+}
+
+// AudioFile — аудиодорожка, извлечённая из видео через ffmpeg.
+type AudioFile struct {
+	ID        string
+	JobID     string
+	FileID    string // пусто если исходный File удалён
+	Path      string
+	Name      string
+	Size      int64
+	AudioMeta        // Title, Artist, Album, Year, Genre
+	CreatedAt time.Time
 }
 
 // CookieRecord — куки одного домена (Netscape-формат), хранимые в БД.

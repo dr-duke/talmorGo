@@ -7,35 +7,49 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/dr-duke/talmorGo/internal/model"
 )
 
-// Extract извлекает аудиодорожку из videoPath и сохраняет её как .m4a в outputDir.
+// Extract извлекает аудиодорожку из videoPath, сохраняет как .m4a в outputDir.
+// Записывает ID3-метаданные из meta (пустые поля пропускаются).
 // Сначала пробует скопировать поток (-c:a copy), при ошибке — перекодирует в AAC.
 // Возвращает путь к созданному файлу.
-func Extract(ctx context.Context, ffmpegBin, videoPath, outputDir string) (string, error) {
+func Extract(ctx context.Context, ffmpegBin, videoPath, outputDir string, meta model.AudioMeta) (string, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return "", fmt.Errorf("create audio dir: %w", err)
 	}
 	base := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
 	outPath := filepath.Join(outputDir, base+".m4a")
 
-	if err := run(ctx, ffmpegBin, videoPath, outPath, "copy"); err != nil {
-		// Fallback: перекодируем в AAC если поток несовместим с m4a
-		if err2 := run(ctx, ffmpegBin, videoPath, outPath, "aac"); err2 != nil {
+	if err := run(ctx, ffmpegBin, videoPath, outPath, "copy", meta); err != nil {
+		if err2 := run(ctx, ffmpegBin, videoPath, outPath, "aac", meta); err2 != nil {
 			return "", fmt.Errorf("ffmpeg copy: %w; ffmpeg aac: %w", err, err2)
 		}
 	}
 	return outPath, nil
 }
 
-func run(ctx context.Context, ffmpegBin, input, output, audioCodec string) error {
-	cmd := exec.CommandContext(ctx, ffmpegBin,
-		"-i", input,
-		"-vn",
-		"-c:a", audioCodec,
-		"-y",
-		output,
-	)
+func run(ctx context.Context, ffmpegBin, input, output, audioCodec string, meta model.AudioMeta) error {
+	args := []string{"-i", input, "-vn", "-c:a", audioCodec}
+	if meta.Title != "" {
+		args = append(args, "-metadata", "title="+meta.Title)
+	}
+	if meta.Artist != "" {
+		args = append(args, "-metadata", "artist="+meta.Artist)
+	}
+	if meta.Album != "" {
+		args = append(args, "-metadata", "album="+meta.Album)
+	}
+	if meta.Year != "" {
+		args = append(args, "-metadata", "date="+meta.Year)
+	}
+	if meta.Genre != "" {
+		args = append(args, "-metadata", "genre="+meta.Genre)
+	}
+	args = append(args, "-y", output)
+
+	cmd := exec.CommandContext(ctx, ffmpegBin, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, truncate(string(out), 300))

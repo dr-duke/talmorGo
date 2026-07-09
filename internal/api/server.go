@@ -31,6 +31,7 @@ func New(
 	cookies repo.CookieRepo,
 	settings repo.SettingsRepo,
 	collections repo.CollectionRepo,
+	audio repo.AudioRepo,
 	store *storage.Storage,
 	pool handler.Enqueuer,
 	hub *sse.Hub,
@@ -48,9 +49,10 @@ func New(
 		Jobs: jobs, Files: files, Tags: tags,
 		Tokens: tokens, Storage: store,
 		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg, Settings: settings,
-		Collections: collections, Expander: expander,
+		Collections: collections, Audio: audio, Expander: expander,
 	}
 	ch := &handler.CollectionHandler{Collections: collections}
+	ah := &handler.AudioHandler{Audio: audio}
 	lh := &handler.LinkHandler{Tokens: tokens, Files: files}
 	sh := &handler.SettingsHandler{Cookies: cookies, Settings: settings, Jobs: jobs, Files: files, Storage: store, Cfg: cfg, SiteName: siteName}
 
@@ -89,10 +91,17 @@ func New(
 
 	// Коллекции.
 	mux.HandleFunc("GET /collections", ch.Fragment)
+	mux.HandleFunc("GET /collections/cards", ch.Cards)
 	mux.HandleFunc("POST /collections", ch.Create)
 	mux.HandleFunc("PATCH /collections/{id}", ch.Rename)
 	mux.HandleFunc("DELETE /collections/{id}", ch.Delete)
 	mux.HandleFunc("POST /collections/{id}/jobs", ch.AddJobs)
+
+	// Аудио.
+	mux.HandleFunc("GET /audio/list", ah.List)
+	mux.HandleFunc("GET /audio/{id}/stream", ah.Stream)
+	mux.HandleFunc("PATCH /audio/{id}", ah.UpdateMeta)
+	mux.HandleFunc("DELETE /audio/{id}", ah.Delete)
 
 	// Очередь — добавление и управление.
 	mux.HandleFunc("POST /queue", qh.Add)

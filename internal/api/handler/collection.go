@@ -13,14 +13,25 @@ type CollectionHandler struct {
 	Collections repo.CollectionRepo
 }
 
-// Fragment отдаёт HTML-фрагмент коллекций для HTMX-refresh.
+// List отдаёт JSON-список коллекций (для dropdown в action bar).
 func (h *CollectionHandler) Fragment(w http.ResponseWriter, r *http.Request) {
 	cols, err := h.Collections.List(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	templ.Handler(templates.CollectionChips(cols)).ServeHTTP(w, r)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(cols) //nolint:errcheck
+}
+
+// Cards отдаёт HTML-фрагмент карточек коллекций (для вкладки Коллекции).
+func (h *CollectionHandler) Cards(w http.ResponseWriter, r *http.Request) {
+	cols, err := h.Collections.List(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	templ.Handler(templates.CollectionsCards(cols)).ServeHTTP(w, r)
 }
 
 // Create создаёт коллекцию и возвращает JSON с созданной записью.
@@ -50,7 +61,7 @@ func (h *CollectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("HX-Trigger", "collectionsRefresh")
+	w.Header().Set("HX-Trigger", `{"collectionsRefresh":true,"tagsRefresh":true}`)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -68,11 +79,11 @@ func (h *CollectionHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("HX-Trigger", "collectionsRefresh")
+	w.Header().Set("HX-Trigger", `{"collectionsRefresh":true,"tagsRefresh":true}`)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// AddJobs добавляет набор заданий в коллекцию (bulk).
+// AddJobs добавляет набор заданий в коллекцию через тег.
 func (h *CollectionHandler) AddJobs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
@@ -86,6 +97,6 @@ func (h *CollectionHandler) AddJobs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("HX-Trigger", `{"collectionsRefresh":true,"showToast":"Добавлено в коллекцию"}`)
+	w.Header().Set("HX-Trigger", `{"collectionsRefresh":true,"tagsRefresh":true,"mediaRefresh":true,"showToast":"Добавлено в коллекцию"}`)
 	w.WriteHeader(http.StatusNoContent)
 }

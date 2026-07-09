@@ -7,89 +7,82 @@ import (
 	"github.com/dr-duke/talmorGo/internal/model"
 )
 
-templ MediaTab(items []*model.MediaItem, tagCounts []*model.TagWithCount, collections []*model.Collection) {
-	<form class="add-form" hx-post="queue" hx-swap="none" hx-on::after-request="if(event.detail.successful)this.reset()">
-		<input
-			type="url"
-			name="url"
-			placeholder="Вставьте ссылку на видео…"
-			autocomplete="off"
-			required
-		/>
-		<button type="submit" class="m3-btn m3-btn-filled">
-			<span class="m3-icon">download</span>
-			Скачать
-		</button>
-	</form>
+templ MediaTab(items []*model.MediaItem, tagCounts []*model.TagWithCount) {
 	<!-- Скрытая форма для передачи состояния фильтра в HTMX-запросы -->
 	<form id="filter-form" style="display:none">
 		<input id="filter-q" name="q" type="hidden"/>
-		<input id="filter-collection" name="collection" type="hidden"/>
 	</form>
-	<div class="filter-bar">
-		<input
-			type="search"
-			id="media-search"
-			class="m3-search"
-			placeholder="Поиск по названию, URL, домену…"
-			oninput="onSearchInput(this)"
-		/>
-		<div class="tag-filter-row">
-			<div id="status-chips"></div>
-			@TagCloud(tagCounts)
+
+	<!-- Три вкладки -->
+	<div id="tab-video" class="tab-panel">
+		<form class="add-form" hx-post="queue" hx-swap="none" hx-on::after-request="if(event.detail.successful)this.reset()">
+			<input
+				type="url"
+				name="url"
+				placeholder="Вставьте ссылку на видео…"
+				autocomplete="off"
+				required
+			/>
+			<button type="submit" class="m3-btn m3-btn-filled">
+				<span class="m3-icon">download</span>
+				Скачать
+			</button>
+		</form>
+		<div class="filter-bar">
+			<input
+				type="search"
+				id="media-search"
+				class="m3-search"
+				placeholder="Поиск по названию, URL, домену…"
+				oninput="onSearchInput(this)"
+			/>
+			<div class="tag-filter-row">
+				<div id="status-chips"></div>
+				@TagCloud(tagCounts)
+			</div>
 		</div>
-		if len(collections) > 0 {
-			@CollectionChips(collections)
-		}
+		@MediaList(items)
 	</div>
-	@MediaList(items)
+
+	<div id="tab-audio" class="tab-panel" style="display:none">
+		<div id="audio-inner" hx-get="audio/list" hx-trigger="audioRefresh from:body" hx-swap="outerHTML">
+			<div class="m3-empty">
+				<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">hourglass_empty</span>
+				<p>Загрузка…</p>
+			</div>
+		</div>
+	</div>
+
+	<div id="tab-collections" class="tab-panel" style="display:none">
+		<div id="collections-inner" hx-get="collections/cards" hx-trigger="collectionsRefresh from:body" hx-swap="outerHTML">
+			<div class="m3-empty">
+				<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">hourglass_empty</span>
+				<p>Загрузка…</p>
+			</div>
+		</div>
+	</div>
+
 	@ActionBar()
 }
 
 templ TagCloud(tagCounts []*model.TagWithCount) {
 	<div id="tag-cloud" hx-get="media/tags" hx-trigger="tagsRefresh from:body" hx-swap="outerHTML">
 		for _, t := range tagCounts {
-			<button
-				class="m3-chip"
-				data-tag={ t.Name }
-				onclick="toggleUserTag(this)"
-			>{ t.Name } <span class="chip-count">{ strconv.Itoa(t.Count) }</span></button>
-		}
-	</div>
-}
-
-templ CollectionChips(collections []*model.Collection) {
-	<div id="collection-chips" class="collection-chips-row" hx-get="collections" hx-trigger="collectionsRefresh from:body" hx-swap="outerHTML">
-		<button
-			class="m3-chip m3-chip-collection active"
-			data-collection-id=""
-			onclick="filterByCollection(this)"
-		>Все</button>
-		for _, c := range collections {
-			<div class="coll-chip-wrap">
+			if t.IsCollection {
 				<button
-					class="m3-chip m3-chip-collection"
-					data-collection-id={ c.ID }
-					onclick="filterByCollection(this)"
-				>{ c.Name } <span class="chip-count">{ strconv.Itoa(c.JobCount) }</span></button>
-				<div class="coll-chip-actions">
-					<button
-						class="coll-chip-action"
-						data-collection-id={ c.ID }
-						data-collection-name={ c.Name }
-						onclick="event.stopPropagation();renameCollection(this.dataset.collectionId, this.dataset.collectionName)"
-						title="Переименовать"
-					><span class="m3-icon" style="font-size:14px">edit</span></button>
-					<button
-						class="coll-chip-action danger"
-						data-collection-id={ c.ID }
-						onclick="event.stopPropagation();deleteCollection(this.dataset.collectionId)"
-						title="Удалить коллекцию"
-					><span class="m3-icon" style="font-size:14px">delete</span></button>
-				</div>
-			</div>
+					class="m3-chip m3-chip-collection-tag"
+					data-tag={ t.Name }
+					onclick="toggleUserTag(this)"
+					title={ "Коллекция: " + t.Name }
+				><span class="m3-icon" style="font-size:14px;vertical-align:middle">folder</span> { t.Name } <span class="chip-count">{ strconv.Itoa(t.Count) }</span></button>
+			} else {
+				<button
+					class="m3-chip"
+					data-tag={ t.Name }
+					onclick="toggleUserTag(this)"
+				>{ t.Name } <span class="chip-count">{ strconv.Itoa(t.Count) }</span></button>
+			}
 		}
-		<button class="m3-chip m3-chip-add" onclick="createCollection()" title="Создать коллекцию">＋</button>
 	</div>
 }
 

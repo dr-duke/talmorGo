@@ -31,6 +31,7 @@ type MediaHandler struct {
 	Cfg         *config.Config
 	Settings    repo.SettingsRepo
 	Collections repo.CollectionRepo
+	Audio       repo.AudioRepo
 	Expander    *playlist.Expander
 }
 
@@ -42,8 +43,7 @@ func (h *MediaHandler) Page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tagCounts, _ := h.Tags.ListWithCount(r.Context())
-	collections, _ := h.Collections.List(r.Context())
-	templ.Handler(templates.MediaTab(items, tagCounts, collections)).ServeHTTP(w, r)
+	templ.Handler(templates.MediaTab(items, tagCounts)).ServeHTTP(w, r)
 }
 
 // List — фрагмент для HTMX: поддерживает серверную фильтрацию (?q=&tag=&collection=).
@@ -106,9 +106,8 @@ func (h *MediaHandler) BulkHide(w http.ResponseWriter, r *http.Request) {
 
 func parseMediaFilter(r *http.Request) model.MediaFilter {
 	return model.MediaFilter{
-		Query:        r.URL.Query().Get("q"),
-		Tags:         r.URL.Query()["tag"],
-		CollectionID: r.URL.Query().Get("collection"),
+		Query: r.URL.Query().Get("q"),
+		Tags:  r.URL.Query()["tag"],
 	}
 }
 
@@ -343,15 +342,34 @@ func (h *MediaHandler) ExtractAudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Авто-заполнение метаданных из задания.
+	var meta model.AudioMeta
+	if job, err := h.Jobs.GetByID(r.Context(), f.JobID); err == nil {
+		meta.Title = job.Title
+		meta.Artist = job.Domain()
+	}
+
 	audioDir := h.Cfg.AudioDir()
-	outPath, err := audio.Extract(r.Context(), h.Cfg.FfmpegBinary, f.Path, audioDir)
+	outPath, err := audio.Extract(r.Context(), h.Cfg.FfmpegBinary, f.Path, audioDir, meta)
 	if err != nil {
 		slog.Error("extract audio", "file_id", id, "err", err)
 		http.Error(w, "audio extraction failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Сохраняем запись в audio_files.
+	if h.Audio != nil {
+		af := &model.AudioFile{
+			JobID:     f.JobID,
+			FileID:    f.ID,
+			Path:      outPath,
+			Name:      filepath.Base(outPath),
+			AudioMeta: meta,
+		}
+		h.Audio.Create(r.Context(), af) //nolint:errcheck
+	}
+
 	slog.Info("audio extracted", "src", f.Path, "dst", outPath)
-	w.Header().Set("HX-Trigger", fmt.Sprintf(`{"showToast":"%s"}`, filepath.Base(outPath)))
+	w.Header().Set("HX-Trigger", fmt.Sprintf(`{"showToast":"%s","audioRefresh":true}`, filepath.Base(outPath)))
 	w.WriteHeader(http.StatusNoContent)
 }

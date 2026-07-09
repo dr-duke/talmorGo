@@ -65,11 +65,13 @@ func (r *sqliteTagRepo) RemoveFromJob(ctx context.Context, jobID, tagName string
 
 func (r *sqliteTagRepo) ListWithCount(ctx context.Context) ([]*model.TagWithCount, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT t.name, COUNT(jt.job_id) AS cnt
+		SELECT t.name, COUNT(jt.job_id) AS cnt,
+		       CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END AS is_coll
 		FROM tags t
 		LEFT JOIN job_tags jt ON jt.tag_id = t.id
+		LEFT JOIN collections c ON c.name = t.name
 		GROUP BY t.id
-		ORDER BY cnt DESC, t.name ASC
+		ORDER BY is_coll DESC, cnt DESC, t.name ASC
 	`)
 	if err != nil {
 		return nil, err
@@ -78,9 +80,11 @@ func (r *sqliteTagRepo) ListWithCount(ctx context.Context) ([]*model.TagWithCoun
 	var out []*model.TagWithCount
 	for rows.Next() {
 		var tw model.TagWithCount
-		if err := rows.Scan(&tw.Name, &tw.Count); err != nil {
+		var isCol int
+		if err := rows.Scan(&tw.Name, &tw.Count, &isCol); err != nil {
 			return nil, err
 		}
+		tw.IsCollection = isCol == 1
 		out = append(out, &tw)
 	}
 	return out, rows.Err()

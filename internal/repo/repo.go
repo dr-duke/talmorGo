@@ -15,10 +15,16 @@ type CollectionRepo interface {
 	Create(ctx context.Context, name string) (*model.Collection, error)
 	Delete(ctx context.Context, id string) error
 	Rename(ctx context.Context, id, name string) error
-	// AddJobs добавляет набор job_id в коллекцию (INSERT OR IGNORE).
+	// AddJobs добавляет набор job_id в коллекцию через тег (имя коллекции = имя тега).
 	AddJobs(ctx context.Context, collectionID string, jobIDs []string) error
-	// RemoveJob убирает одно задание из коллекции.
-	RemoveJob(ctx context.Context, collectionID, jobID string) error
+}
+
+type AudioRepo interface {
+	Create(ctx context.Context, f *model.AudioFile) error
+	GetByID(ctx context.Context, id string) (*model.AudioFile, error)
+	List(ctx context.Context) ([]*model.AudioFile, error)
+	UpdateMeta(ctx context.Context, id string, meta model.AudioMeta) error
+	Delete(ctx context.Context, id string) error
 }
 
 type JobRepo interface {

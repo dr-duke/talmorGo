@@ -22,9 +22,10 @@ func NewCollectionRepo(db *sql.DB) CollectionRepo {
 func (r *sqliteCollectionRepo) List(ctx context.Context) ([]*model.Collection, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT c.id, c.name, c.created_at,
-		       COUNT(cj.job_id) AS job_count
+		       COUNT(jt.job_id) AS job_count
 		FROM collections c
-		LEFT JOIN collection_jobs cj ON cj.collection_id = c.id
+		LEFT JOIN tags t ON t.name = c.name
+		LEFT JOIN job_tags jt ON jt.tag_id = t.id
 		GROUP BY c.id
 		ORDER BY c.created_at ASC
 	`)
@@ -58,50 +59,59 @@ func (r *sqliteCollectionRepo) Create(ctx context.Context, name string) (*model.
 }
 
 func (r *sqliteCollectionRepo) Delete(ctx context.Context, id string) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM collections WHERE id=?`, id)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	var name string
+	if err := r.db.QueryRowContext(ctx, `SELECT name FROM collections WHERE id=?`, id).Scan(&name); err != nil {
 		return fmt.Errorf("collection %s not found", id)
 	}
+	// Remove tag assignments for this collection name.
+	r.db.ExecContext(ctx, `DELETE FROM job_tags WHERE tag_id = (SELECT id FROM tags WHERE name=?)`, name) //nolint:errcheck
+	// Remove the tag itself.
+	r.db.ExecContext(ctx, `DELETE FROM tags WHERE name=?`, name) //nolint:errcheck
+	_, err := r.db.ExecContext(ctx, `DELETE FROM collections WHERE id=?`, id)
+	return err
+}
+
+func (r *sqliteCollectionRepo) Rename(ctx context.Context, id, newName string) error {
+	var oldName string
+	if err := r.db.QueryRowContext(ctx, `SELECT name FROM collections WHERE id=?`, id).Scan(&oldName); err != nil {
+		return fmt.Errorf("collection %s not found", id)
+	}
+	if _, err := r.db.ExecContext(ctx, `UPDATE collections SET name=? WHERE id=?`, newName, id); err != nil {
+		return err
+	}
+	// Rename the backing tag so existing assignments follow the new name.
+	r.db.ExecContext(ctx, `UPDATE tags SET name=? WHERE name=?`, newName, oldName) //nolint:errcheck
 	return nil
 }
 
+// AddJobs связывает набор заданий с коллекцией через тег (имя коллекции = имя тега).
 func (r *sqliteCollectionRepo) AddJobs(ctx context.Context, collectionID string, jobIDs []string) error {
 	if len(jobIDs) == 0 {
 		return nil
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	var name string
+	if err := r.db.QueryRowContext(ctx, `SELECT name FROM collections WHERE id=?`, collectionID).Scan(&name); err != nil {
+		return fmt.Errorf("collection %s not found", collectionID)
+	}
+
+	// Upsert tag.
+	newID := uuid.NewString()
+	r.db.ExecContext(ctx, `INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)`, newID, name) //nolint:errcheck
+
+	var tagID string
+	if err := r.db.QueryRowContext(ctx, `SELECT id FROM tags WHERE name=?`, name).Scan(&tagID); err != nil {
+		return fmt.Errorf("tag lookup failed: %w", err)
+	}
+
+	// Bulk insert into job_tags.
 	placeholders := make([]string, len(jobIDs))
-	args := make([]any, 0, len(jobIDs)*3)
-	for i, id := range jobIDs {
-		placeholders[i] = "(?, ?, ?)"
-		args = append(args, collectionID, id, now)
+	args := make([]any, 0, len(jobIDs)*2)
+	for i, jid := range jobIDs {
+		placeholders[i] = "(?, ?)"
+		args = append(args, jid, tagID)
 	}
 	_, err := r.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO collection_jobs (collection_id, job_id, added_at) VALUES `+
-			strings.Join(placeholders, ","),
+		`INSERT OR IGNORE INTO job_tags (job_id, tag_id) VALUES `+strings.Join(placeholders, ","),
 		args...)
 	return err
-}
-
-func (r *sqliteCollectionRepo) RemoveJob(ctx context.Context, collectionID, jobID string) error {
-	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM collection_jobs WHERE collection_id=? AND job_id=?`,
-		collectionID, jobID)
-	return err
-}
-
-func (r *sqliteCollectionRepo) Rename(ctx context.Context, id, name string) error {
-	res, err := r.db.ExecContext(ctx, `UPDATE collections SET name=? WHERE id=?`, name, id)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("collection %s not found", id)
-	}
-	return nil
 }
