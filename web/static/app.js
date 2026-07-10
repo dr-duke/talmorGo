@@ -153,7 +153,6 @@ document.addEventListener('click', (e) => {
 let plyrPlayer   = null;
 let playerKind   = null;   // 'video' | 'audio' | null
 let _minimizing  = false;  // flag: dialog close triggered by playerMinimize()
-let _closing     = false;  // flag: dialog close triggered by playerClose()
 
 /* ── Playlist (video sequential) ── */
 let playlist = [];
@@ -287,9 +286,14 @@ function playerToggle() {
 
 /* ── Full stop ── */
 function playerClose() {
-  _closing = true;
+  const kind = playerKind;
+  // Clear playerKind BEFORE dlg.close() — the 'close' event fires asynchronously
+  // (browser queues it as a task), so by the time it fires _closing would already
+  // be reset. Instead we check playerKind===null in the handler.
+  playerKind = null;
+  playlist = []; playlistIndex = -1;
 
-  if (playerKind === 'video') {
+  if (kind === 'video') {
     const dlg = document.getElementById('player-dialog');
     if (dlg && dlg.open) dlg.close();
     if (plyrPlayer) {
@@ -298,14 +302,11 @@ function playerClose() {
     }
     const video = document.getElementById('main-player');
     if (video) { video.autoplay = false; video.src = ''; }
-  } else if (playerKind === 'audio') {
+  } else if (kind === 'audio') {
     const a = document.getElementById('audio-player');
     if (a) { a.pause(); a.src = ''; }
   }
 
-  _closing = false;
-  playerKind = null;
-  playlist = []; playlistIndex = -1;
   _barHide();
 }
 
@@ -323,8 +324,11 @@ document.getElementById('player-dialog')?.addEventListener('cancel', (e) => {
 });
 
 document.getElementById('player-dialog')?.addEventListener('close', () => {
-  if (_closing || _minimizing) return;
-  // Backdrop click or other implicit close → treat as minimize
+  // 'close' event is async (browser queues it); by the time it fires:
+  //   - playerMinimize(): _minimizing may already be false → check _minimizing first
+  //   - playerClose():    playerKind is already null  → check playerKind
+  if (_minimizing || playerKind === null) return;
+  // Implicit close (backdrop click) → treat as minimize
   _barShow();
 });
 
