@@ -135,23 +135,6 @@ templ Layout(title string, basePath string, siteName string) {
 				}
 				.header-logo { display: flex; align-items: center; gap: .5rem; text-decoration: none; }
 				.header-logo-name { font-size: 1rem; font-weight: 700; color: var(--text); letter-spacing: -.01em; }
-				.header-tabs { display: flex; gap: .15rem; margin-left: .5rem; }
-				.header-tab {
-					display: flex; align-items: center; gap: .35rem;
-					padding: .35rem .8rem; border-radius: 9999px;
-					border: none; background: transparent;
-					font-size: .8125rem; font-weight: 500; color: var(--text-2);
-					cursor: pointer; transition: background .15s, color .15s;
-					position: relative;
-				}
-				.header-tab:hover { background: var(--surface-2); color: var(--text); }
-				.header-tab.active { background: var(--surface-3); color: var(--text); }
-				.tab-badge {
-					display: inline-flex; align-items: center; justify-content: center;
-					min-width: 18px; height: 18px; padding: 0 5px;
-					background: var(--accent); color: var(--accent-on);
-					border-radius: 9999px; font-size: .65rem; font-weight: 700;
-				}
 				.header-spacer { flex: 1; }
 				.header-add-form { display: flex; gap: .4rem; align-items: center; }
 				.header-url-input {
@@ -183,6 +166,8 @@ templ Layout(title string, basePath string, siteName string) {
 				}
 				.sidebar-nav-item:hover { background: var(--surface-2); color: var(--text); }
 				.sidebar-nav-item.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+				.sidebar-queue-item { color: var(--text); font-weight: 500; }
+				.sidebar-queue-divider { height: 1px; background: var(--border-soft); margin: .5rem 0; }
 				.sidebar-section-label {
 					display: block; padding: .75rem 1rem .2rem;
 					font-size: .65rem; font-weight: 700; text-transform: uppercase;
@@ -520,6 +505,7 @@ templ Layout(title string, basePath string, siteName string) {
 					.sidebar::-webkit-scrollbar { display: none; }
 					.sidebar-section-label { display: none; }
 					.sidebar-divider { display: none; }
+					.sidebar-queue-divider { display: none; }
 					.sidebar-nav-item {
 						border-radius: 9999px; margin-right: 0; width: auto;
 						padding: .3rem .75rem; white-space: nowrap; flex-shrink: 0;

@@ -21,17 +21,29 @@ document.body.addEventListener('showToast', (e) => {
   showToast(e.detail?.value || '');
 });
 
-/* ── Tab switching ── */
-function switchTab(tab) {
-  const libSection = document.getElementById('lib-section');
-  const queueSection = document.getElementById('queue-section');
-  const libBtn = document.getElementById('tab-lib-btn');
-  const queueBtn = document.getElementById('tab-queue-btn');
-  if (!libSection || !queueSection) return;
-  libSection.style.display = tab === 'lib' ? '' : 'none';
-  queueSection.style.display = tab === 'queue' ? '' : 'none';
-  libBtn.classList.toggle('active', tab === 'lib');
-  queueBtn.classList.toggle('active', tab === 'queue');
+/* ── Section switching (lib / queue) ── */
+function _showLib() {
+  const lib = document.getElementById('lib-section');
+  const q   = document.getElementById('queue-section');
+  if (lib) lib.style.display = '';
+  if (q)   q.style.display   = 'none';
+  document.getElementById('sidebar-queue-btn')?.classList.remove('active');
+}
+
+function _showQueue() {
+  const lib = document.getElementById('lib-section');
+  const q   = document.getElementById('queue-section');
+  if (lib) lib.style.display = 'none';
+  if (q)   q.style.display   = '';
+}
+
+function setQueue(btn) {
+  filter.q = ''; filter.kind = ''; filter.tag = '';
+  hidePlayAll();
+  document.querySelectorAll('.sidebar-nav-item[data-kind]').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.sidebar-nav-item[data-coll]').forEach(b => b.classList.remove('active'));
+  document.getElementById('sidebar-queue-btn')?.classList.add('active');
+  _showQueue();
 }
 
 /* ── Filter state ── */
@@ -52,6 +64,7 @@ function setKind(btn, kind) {
   filter.kind = kind;
   filter.tag = '';
   hideSidebarColl();
+  _showLib();
   document.querySelectorAll('.sidebar-nav-item[data-kind]').forEach(b => {
     b.classList.toggle('active', b.dataset.kind === kind);
   });
@@ -66,6 +79,7 @@ function setColl(btn, name) {
   document.querySelectorAll('.sidebar-nav-item[data-coll]').forEach(b => {
     b.classList.toggle('active', b.dataset.coll === name);
   });
+  _showLib();
   showPlayAll(name);
   applyFilter();
 }

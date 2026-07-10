@@ -10,6 +10,10 @@ func itoa(n int) string { return strconv.Itoa(n) }
 // SidebarNav — фрагмент боковой навигации (обновляется после изменения коллекций).
 templ SidebarNav(cols []*model.Collection) {
 	<nav class="sidebar" id="sidebar">
+		<button class="sidebar-nav-item sidebar-queue-item" id="sidebar-queue-btn" onclick="setQueue(this)">
+			<span class="mi">pending</span>Очередь
+		</button>
+		<div class="sidebar-queue-divider"></div>
 		<button class="sidebar-nav-item active" data-kind="" onclick="setKind(this,'')">
 			<span class="mi">list</span>Все
 		</button>
@@ -49,15 +53,6 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 					<img src="static/logo.svg" width="28" height="28" alt=""/>
 					<span class="header-logo-name">{ siteName }</span>
 				</a>
-				<nav class="header-tabs">
-					<button class="header-tab active" id="tab-lib-btn" onclick="switchTab('lib')">
-						<span class="mi">video_library</span>Библиотека
-					</button>
-					<button class="header-tab" id="tab-queue-btn" onclick="switchTab('queue')">
-						<span class="mi">queue</span>Очередь
-						<span class="tab-badge" id="queue-badge" style="display:none"></span>
-					</button>
-				</nav>
 				<div class="header-spacer"></div>
 				<form
 					class="header-add-form"
