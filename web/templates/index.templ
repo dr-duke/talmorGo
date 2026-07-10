@@ -1,12 +1,214 @@
 package templates
 
-templ Index(basePath string, siteName string) {
-	@Layout("Медиатека", basePath, siteName, false) {
-		<div
-			id="content"
-			hx-get="library"
-			hx-trigger="load"
-			hx-swap="innerHTML"
-		></div>
+import (
+	"strconv"
+	"github.com/dr-duke/talmorGo/internal/model"
+)
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// SidebarNav — фрагмент боковой навигации (обновляется после изменения коллекций).
+templ SidebarNav(cols []*model.Collection) {
+	<nav class="sidebar" id="sidebar">
+		<button class="sidebar-nav-item active" data-kind="" onclick="setKind(this,'')">
+			<span class="mi">list</span>Все
+		</button>
+		<button class="sidebar-nav-item" data-kind="video" onclick="setKind(this,'video')">
+			<span class="mi">videocam</span>Видео
+		</button>
+		<button class="sidebar-nav-item" data-kind="audio" onclick="setKind(this,'audio')">
+			<span class="mi">audio_file</span>Аудио
+		</button>
+		if len(cols) > 0 {
+			<div class="sidebar-divider"></div>
+			<span class="sidebar-section-label">Коллекции</span>
+			for _, c := range cols {
+				<button
+					class="sidebar-nav-item"
+					data-coll={ c.Name }
+					onclick="setColl(this,this.dataset.coll)"
+					title={ c.Name }
+				>
+					<span class="mi">folder</span>
+					<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{ c.Name }</span>
+					if c.ItemCount > 0 {
+						<span class="sidebar-count">{ itoa(c.ItemCount) }</span>
+					}
+				</button>
+			}
+		}
+	</nav>
+}
+
+templ Index(basePath string, siteName string, cols []*model.Collection) {
+	@Layout("Медиатека", basePath, siteName) {
+		<div class="app-shell">
+			<!-- ── Header ── -->
+			<header class="app-header">
+				<a class="header-logo" href="./">
+					<img src="static/logo.svg" width="28" height="28" alt=""/>
+					<span class="header-logo-name">{ siteName }</span>
+				</a>
+				<nav class="header-tabs">
+					<button class="header-tab active" id="tab-lib-btn" onclick="switchTab('lib')">
+						<span class="mi">video_library</span>Библиотека
+					</button>
+					<button class="header-tab" id="tab-queue-btn" onclick="switchTab('queue')">
+						<span class="mi">queue</span>Очередь
+						<span class="tab-badge" id="queue-badge" style="display:none"></span>
+					</button>
+				</nav>
+				<div class="header-spacer"></div>
+				<form
+					class="header-add-form"
+					hx-post="queue"
+					hx-swap="none"
+					hx-on::after-request="if(event.detail.successful)this.reset()"
+				>
+					<input
+						type="url"
+						name="url"
+						class="header-url-input"
+						placeholder="Вставьте ссылку…"
+						autocomplete="off"
+						required
+					/>
+					<button type="submit" class="btn btn-primary btn-sm">
+						<span class="mi">download</span>
+						<span class="header-add-btn-text">Скачать</span>
+					</button>
+				</form>
+				<a href="settings" class="icon-btn" title="Настройки"><span class="mi">settings</span></a>
+			</header>
+
+			<div class="app-body">
+				<!-- ── Sidebar ── -->
+				@SidebarNav(cols)
+
+				<!-- ── Main ── -->
+				<main class="main-content">
+					<!-- Library section -->
+					<div id="lib-section" class="content-inner">
+						<div class="toolbar">
+							<input
+								type="search"
+								id="media-search"
+								class="search-input"
+								placeholder="Поиск по названию, URL, домену…"
+								oninput="onSearch(this.value)"
+							/>
+							<div class="toolbar-chips">
+								<div
+									id="tag-cloud"
+									hx-get="library/tags"
+									hx-trigger="load once, tagsRefresh from:body"
+									hx-swap="outerHTML"
+								></div>
+							</div>
+						</div>
+
+						<div id="play-all-bar" class="play-all-bar">
+							<span class="mi" style="color:var(--accent)">folder</span>
+							<span class="play-all-title" id="play-all-title"></span>
+							<button class="btn btn-primary btn-sm" onclick="playAll()">
+								<span class="mi">play_arrow</span>Воспроизвести всё
+							</button>
+						</div>
+
+						<div
+							id="media-inner"
+							hx-get="library/items"
+							hx-trigger="load, mediaRefresh from:body"
+							hx-swap="outerHTML"
+							hx-include="#filter-form"
+						>
+							<div class="empty-state" id="media-loading">
+								<span class="mi">hourglass_empty</span>
+								<p>Загрузка…</p>
+							</div>
+						</div>
+
+						<!-- Скрытая форма фильтров -->
+						<form id="filter-form" style="display:none">
+							<input id="filter-q" name="q" type="hidden"/>
+							<input id="filter-kind" name="kind" type="hidden"/>
+							<input id="filter-tag" name="tag" type="hidden"/>
+						</form>
+					</div>
+
+					<!-- Queue section -->
+					<div id="queue-section" class="content-inner" style="display:none">
+						<div class="queue-toolbar">
+							<button
+								class="btn btn-ghost btn-sm"
+								hx-post="queue/cancel-all"
+								hx-swap="none"
+								title="Отменить все активные задачи"
+							>
+								<span class="mi">cancel</span>Отменить все активные
+							</button>
+						</div>
+						<div
+							id="queue-inner"
+							hx-get="queue/items"
+							hx-trigger="load, mediaRefresh from:body"
+							hx-swap="outerHTML"
+						>
+							<div class="empty-state">
+								<span class="mi">hourglass_empty</span>
+								<p>Загрузка…</p>
+							</div>
+						</div>
+					</div>
+				</main>
+			</div>
+		</div>
+
+		<!-- ── Dialogs ── -->
+		<dialog id="player-dialog">
+			<div class="dialog-header video-dialog-header">
+				<span class="dialog-title" id="player-title"></span>
+				<button class="icon-btn player-close" onclick="closePlayer()"><span class="mi">close</span></button>
+			</div>
+			<div id="player-wrap">
+				<video id="main-player" controls playsinline style="width:100%;display:block"></video>
+			</div>
+		</dialog>
+
+		<dialog id="audio-dialog">
+			<div class="dialog-header">
+				<span class="dialog-title">Аудио</span>
+				<button class="icon-btn" onclick="closeAudio()"><span class="mi">close</span></button>
+			</div>
+			<div class="audio-body">
+				<div class="audio-title" id="audio-title"></div>
+				<audio id="audio-player" controls style="width:100%"></audio>
+			</div>
+		</dialog>
+
+		<dialog id="log-dialog">
+			<div class="dialog-header">
+				<span class="dialog-title" id="log-title">Лог скачивания</span>
+				<button class="icon-btn player-close" onclick="document.getElementById('log-dialog').close()"><span class="mi">close</span></button>
+			</div>
+			<pre id="log-content">Загрузка…</pre>
+		</dialog>
+
+		@ActionBar()
+
+		<!-- ── SSE: dispatches htmx mediaRefresh ── -->
+		<script>
+			(function() {
+				const base = document.querySelector('base')?.href || '/';
+				const es = new EventSource(base + 'events');
+				function dispatchRefresh() {
+					htmx.trigger(document.body, 'mediaRefresh');
+				}
+				es.addEventListener('update', dispatchRefresh);
+				es.addEventListener('message', dispatchRefresh);
+			})();
+		</script>
+
+		<script src="static/app.js"></script>
 	}
 }

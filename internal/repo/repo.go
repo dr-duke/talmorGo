@@ -56,6 +56,7 @@ type JobRepo interface {
 	ClaimNext(ctx context.Context) (*model.Job, error)
 	Update(ctx context.Context, job *model.Job) error
 	Cancel(ctx context.Context, id string) error
+	CancelAll(ctx context.Context) (int64, error)
 	ConfirmSingle(ctx context.Context, id string) error
 	DeleteChecking(ctx context.Context, id string) error
 	Hide(ctx context.Context, id string) error

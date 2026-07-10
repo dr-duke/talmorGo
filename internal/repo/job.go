@@ -372,6 +372,19 @@ func (r *sqliteJobRepo) Cancel(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *sqliteJobRepo) CancelAll(ctx context.Context) (int64, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE jobs SET status='cancelled', next_retry_at=NULL, updated_at=?
+		 WHERE status IN ('checking','pending','running','retrying')`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 func (r *sqliteJobRepo) ConfirmSingle(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE jobs SET status='pending', updated_at=? WHERE id=? AND status='checking'`,

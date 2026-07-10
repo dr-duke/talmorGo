@@ -94,6 +94,9 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 				if filePattern.MatchString(text) {
 					mu.Lock()
 					fileCount++
+					if len(logLines) < maxLogLines {
+						logLines = append(logLines, "[file] "+filepath.Base(text))
+					}
 					mu.Unlock()
 					ch <- Event{FileName: filepath.Base(text), Path: text}
 				} else {

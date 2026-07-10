@@ -8,7 +8,15 @@ package templates
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-func Index(basePath string, siteName string) templ.Component {
+import (
+	"github.com/dr-duke/talmorGo/internal/model"
+	"strconv"
+)
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// SidebarNav — фрагмент боковой навигации (обновляется после изменения коллекций).
+func SidebarNav(cols []*model.Collection) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -29,7 +37,114 @@ func Index(basePath string, siteName string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var2 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<nav class=\"sidebar\" id=\"sidebar\"><button class=\"sidebar-nav-item active\" data-kind=\"\" onclick=\"setKind(this,'')\"><span class=\"mi\">list</span>Все</button> <button class=\"sidebar-nav-item\" data-kind=\"video\" onclick=\"setKind(this,'video')\"><span class=\"mi\">videocam</span>Видео</button> <button class=\"sidebar-nav-item\" data-kind=\"audio\" onclick=\"setKind(this,'audio')\"><span class=\"mi\">audio_file</span>Аудио</button> ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if len(cols) > 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"sidebar-divider\"></div><span class=\"sidebar-section-label\">Коллекции</span> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, c := range cols {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<button class=\"sidebar-nav-item\" data-coll=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var2 string
+				templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(c.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/index.templ`, Line: 28, Col: 23}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" onclick=\"setColl(this,this.dataset.coll)\" title=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var3 string
+				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(c.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/index.templ`, Line: 30, Col: 19}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\"><span class=\"mi\">folder</span> <span style=\"flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var4 string
+				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(c.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/index.templ`, Line: 33, Col: 104}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</span> ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if c.ItemCount > 0 {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<span class=\"sidebar-count\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var5 string
+					templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(c.ItemCount))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/index.templ`, Line: 35, Col: 53}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</span>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</button>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</nav>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+func Index(basePath string, siteName string, cols []*model.Collection) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var6 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var6 == nil {
+			templ_7745c5c3_Var6 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Var7 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -41,13 +156,42 @@ func Index(basePath string, siteName string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"content\" hx-get=\"library\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div class=\"app-shell\"><!-- ── Header ── --><header class=\"app-header\"><a class=\"header-logo\" href=\"./\"><img src=\"static/logo.svg\" width=\"28\" height=\"28\" alt=\"\"> <span class=\"header-logo-name\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var8 string
+			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(siteName)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/index.templ`, Line: 50, Col: 46}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</span></a><nav class=\"header-tabs\"><button class=\"header-tab active\" id=\"tab-lib-btn\" onclick=\"switchTab('lib')\"><span class=\"mi\">video_library</span>Библиотека</button> <button class=\"header-tab\" id=\"tab-queue-btn\" onclick=\"switchTab('queue')\"><span class=\"mi\">queue</span>Очередь <span class=\"tab-badge\" id=\"queue-badge\" style=\"display:none\"></span></button></nav><div class=\"header-spacer\"></div><form class=\"header-add-form\" hx-post=\"queue\" hx-swap=\"none\" hx-on::after-request=\"if(event.detail.successful)this.reset()\"><input type=\"url\" name=\"url\" class=\"header-url-input\" placeholder=\"Вставьте ссылку…\" autocomplete=\"off\" required> <button type=\"submit\" class=\"btn btn-primary btn-sm\"><span class=\"mi\">download</span> <span class=\"header-add-btn-text\">Скачать</span></button></form><a href=\"settings\" class=\"icon-btn\" title=\"Настройки\"><span class=\"mi\">settings</span></a></header><div class=\"app-body\"><!-- ── Sidebar ── -->")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = SidebarNav(cols).Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<!-- ── Main ── --><main class=\"main-content\"><!-- Library section --><div id=\"lib-section\" class=\"content-inner\"><div class=\"toolbar\"><input type=\"search\" id=\"media-search\" class=\"search-input\" placeholder=\"Поиск по названию, URL, домену…\" oninput=\"onSearch(this.value)\"><div class=\"toolbar-chips\"><div id=\"tag-cloud\" hx-get=\"library/tags\" hx-trigger=\"load once, tagsRefresh from:body\" hx-swap=\"outerHTML\"></div></div></div><div id=\"play-all-bar\" class=\"play-all-bar\"><span class=\"mi\" style=\"color:var(--accent)\">folder</span> <span class=\"play-all-title\" id=\"play-all-title\"></span> <button class=\"btn btn-primary btn-sm\" onclick=\"playAll()\"><span class=\"mi\">play_arrow</span>Воспроизвести всё</button></div><div id=\"media-inner\" hx-get=\"library/items\" hx-trigger=\"load, mediaRefresh from:body\" hx-swap=\"outerHTML\" hx-include=\"#filter-form\"><div class=\"empty-state\" id=\"media-loading\"><span class=\"mi\">hourglass_empty</span><p>Загрузка…</p></div></div><!-- Скрытая форма фильтров --><form id=\"filter-form\" style=\"display:none\"><input id=\"filter-q\" name=\"q\" type=\"hidden\"> <input id=\"filter-kind\" name=\"kind\" type=\"hidden\"> <input id=\"filter-tag\" name=\"tag\" type=\"hidden\"></form></div><!-- Queue section --><div id=\"queue-section\" class=\"content-inner\" style=\"display:none\"><div class=\"queue-toolbar\"><button class=\"btn btn-ghost btn-sm\" hx-post=\"queue/cancel-all\" hx-swap=\"none\" title=\"Отменить все активные задачи\"><span class=\"mi\">cancel</span>Отменить все активные</button></div><div id=\"queue-inner\" hx-get=\"queue/items\" hx-trigger=\"load, mediaRefresh from:body\" hx-swap=\"outerHTML\"><div class=\"empty-state\"><span class=\"mi\">hourglass_empty</span><p>Загрузка…</p></div></div></div></main></div></div><!-- ── Dialogs ── --> <dialog id=\"player-dialog\"><div class=\"dialog-header video-dialog-header\"><span class=\"dialog-title\" id=\"player-title\"></span> <button class=\"icon-btn player-close\" onclick=\"closePlayer()\"><span class=\"mi\">close</span></button></div><div id=\"player-wrap\"><video id=\"main-player\" controls playsinline style=\"width:100%;display:block\"></video></div></dialog> <dialog id=\"audio-dialog\"><div class=\"dialog-header\"><span class=\"dialog-title\">Аудио</span> <button class=\"icon-btn\" onclick=\"closeAudio()\"><span class=\"mi\">close</span></button></div><div class=\"audio-body\"><div class=\"audio-title\" id=\"audio-title\"></div><audio id=\"audio-player\" controls style=\"width:100%\"></audio></div></dialog> <dialog id=\"log-dialog\"><div class=\"dialog-header\"><span class=\"dialog-title\" id=\"log-title\">Лог скачивания</span> <button class=\"icon-btn player-close\" onclick=\"document.getElementById('log-dialog').close()\"><span class=\"mi\">close</span></button></div><pre id=\"log-content\">Загрузка…</pre></dialog>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = ActionBar().Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, " <!-- ── SSE: dispatches htmx mediaRefresh ── --> <script>\n\t\t\t(function() {\n\t\t\t\tconst base = document.querySelector('base')?.href || '/';\n\t\t\t\tconst es = new EventSource(base + 'events');\n\t\t\t\tfunction dispatchRefresh() {\n\t\t\t\t\thtmx.trigger(document.body, 'mediaRefresh');\n\t\t\t\t}\n\t\t\t\tes.addEventListener('update', dispatchRefresh);\n\t\t\t\tes.addEventListener('message', dispatchRefresh);\n\t\t\t})();\n\t\t</script> <script src=\"static/app.js\"></script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Медиатека", basePath, siteName, false).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Медиатека", basePath, siteName).Render(templ.WithChildren(ctx, templ_7745c5c3_Var7), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

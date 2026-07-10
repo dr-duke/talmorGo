@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/web/templates"
 )
 
 type Enqueuer interface {
@@ -97,6 +99,31 @@ func (h *QueueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("HX-Trigger", "mediaRefresh")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// CancelAll отменяет все активные задачи (checking/pending/running/retrying).
+func (h *QueueHandler) CancelAll(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.Jobs.CancelAll(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("HX-Trigger", "mediaRefresh")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Items отдаёт HTMX-фрагмент со списком задач очереди (checking/pending/running/retrying/failed/cancelled).
+func (h *QueueHandler) Items(w http.ResponseWriter, r *http.Request) {
+	jobs, err := h.Jobs.List(r.Context(), repo.JobFilter{
+		Statuses: []model.JobStatus{
+			model.JobChecking, model.JobPending, model.JobRunning,
+			model.JobRetrying, model.JobFailed, model.JobCancelled,
+		},
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	templ.Handler(templates.QueueItems(jobs)).ServeHTTP(w, r)
 }
 
 // Retry переводит failed-задачу обратно в pending.

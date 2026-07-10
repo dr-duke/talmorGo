@@ -1,0 +1,117 @@
+package templates
+
+import (
+	"fmt"
+	"github.com/dr-duke/talmorGo/internal/model"
+)
+
+// QueueItems — HTMX-фрагмент: список задач очереди.
+templ QueueItems(jobs []*model.Job) {
+	<div
+		id="queue-inner"
+		hx-get="queue/items"
+		hx-trigger="mediaRefresh from:body"
+		hx-swap="outerHTML"
+	>
+		if len(jobs) == 0 {
+			<div class="empty-state">
+				<span class="mi">done_all</span>
+				<p>Очередь пуста</p>
+			</div>
+		} else {
+			<div class="queue-list">
+				for _, j := range jobs {
+					@queueRow(j)
+				}
+			</div>
+		}
+	</div>
+}
+
+templ queueRow(j *model.Job) {
+	<div class={ "queue-row", "ql-" + string(j.Status) } data-job-id={ j.ID }>
+		<div class="queue-row-main">
+			<div class="queue-row-title">{ j.DisplayName() }</div>
+			<div class="queue-row-meta">
+				<span class="queue-domain">{ j.Domain() }</span>
+				<span style={ "font-size:.72rem;color:var(--" + queueStatusColor(j.Status) + ")" }>
+					{ statusLabel(string(j.Status)) }
+				</span>
+				if j.Status == model.JobRetrying && j.NextRetryAt != nil {
+					<span class="queue-retry">{ retryIn(j.NextRetryAt) }</span>
+				}
+			</div>
+		</div>
+		<div class="queue-row-actions">
+			switch j.Status {
+				case model.JobRetrying:
+					<button
+						class="icon-btn"
+						hx-post={ fmt.Sprintf("jobs/%s/retry", j.ID) }
+						hx-swap="none"
+						title="Повторить сейчас"
+					><span class="mi">replay</span></button>
+					<button
+						class="icon-btn danger"
+						hx-delete={ fmt.Sprintf("queue/%s", j.ID) }
+						hx-swap="none"
+						title="Отменить"
+					><span class="mi">cancel</span></button>
+				case model.JobChecking, model.JobPending, model.JobRunning:
+					<button
+						class="icon-btn danger"
+						hx-delete={ fmt.Sprintf("queue/%s", j.ID) }
+						hx-swap="none"
+						title="Отменить"
+					><span class="mi">cancel</span></button>
+				case model.JobFailed:
+					<button
+						class="icon-btn"
+						hx-post={ fmt.Sprintf("jobs/%s/retry", j.ID) }
+						hx-swap="none"
+						title="Повторить"
+					><span class="mi">replay</span></button>
+					<button
+						class="icon-btn"
+						hx-post={ fmt.Sprintf("jobs/%s/redownload", j.ID) }
+						hx-swap="none"
+						title="Перезапустить"
+					><span class="mi">refresh</span></button>
+				case model.JobCancelled:
+					<button
+						class="icon-btn"
+						hx-post={ fmt.Sprintf("jobs/%s/redownload", j.ID) }
+						hx-swap="none"
+						title="Перезапустить"
+					><span class="mi">refresh</span></button>
+			}
+			if queueShowLog(j) {
+				<button
+					class="icon-btn"
+					data-job-id={ j.ID }
+					data-title={ j.DisplayName() }
+					onclick="openLog(this.dataset.jobId, this.dataset.title)"
+					title="Лог"
+				><span class="mi">terminal</span></button>
+			}
+		</div>
+	</div>
+}
+
+func queueStatusColor(s model.JobStatus) string {
+	switch s {
+	case model.JobChecking, model.JobPending, model.JobRunning, model.JobRetrying:
+		return "accent"
+	case model.JobFailed:
+		return "danger"
+	case model.JobCancelled:
+		return "text-3"
+	default:
+		return "text-2"
+	}
+}
+
+func queueShowLog(j *model.Job) bool {
+	return j.Source != "filesystem" &&
+		j.Status != model.JobPending && j.Status != model.JobChecking
+}

@@ -8,26 +8,26 @@ import (
 )
 
 templ SettingsPage(basePath string, siteName string, records []*model.CookieRecord, cookieFileStatus string, rtSettings map[string]string, rtDefaults map[string]string) {
-	@Layout("Настройки", basePath, siteName, true) {
-		<div id="content">
+	@Layout("Настройки", basePath, siteName) {
+		<div class="settings-wrap">
+			<div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem">
+				<a href="./" class="icon-btn" title="Назад"><span class="mi">arrow_back</span></a>
+				<h1 class="settings-h" style="margin:0">Настройки</h1>
+			</div>
 			@RuntimeSettingsSection(basePath, rtSettings, rtDefaults)
 			<section class="settings-section">
-				<h2 class="settings-heading">Куки авторизации</h2>
+				<h2 class="settings-h2">Куки авторизации</h2>
 				<p class="settings-hint">
 					Вставьте содержимое файла <code>cookies.txt</code> в формате Netscape
 					(экспортируется расширением браузера «Get cookies.txt LOCALLY» или аналогом).
 					Для YouTube нужны куки <strong>авторизованной</strong> сессии с подтверждённым возрастом.
-					Куки применяются ко всем загрузкам yt-dlp.
 				</p>
-				<p class="settings-hint">
-					Файл на диске: <code>{ cookieFileStatus }</code>
-				</p>
+				<p class="settings-hint">Файл на диске: <code>{ cookieFileStatus }</code></p>
 				<form
 					hx-post="settings/cookies/import"
 					hx-target="#cookie-domain-list"
 					hx-swap="outerHTML"
 					hx-on:htmx:after-request="this.reset()"
-					class="cookie-import-form"
 				>
 					<textarea
 						name="body"
@@ -37,33 +37,30 @@ templ SettingsPage(basePath string, siteName string, records []*model.CookieReco
 						required
 					></textarea>
 					<div class="settings-actions">
-						<button type="submit" class="m3-btn m3-btn-filled">
-							<span class="m3-icon">upload_file</span>
-							Импортировать
+						<button type="submit" class="btn btn-primary btn-sm">
+							<span class="mi">upload_file</span>Импортировать
 						</button>
 					</div>
 				</form>
 			</section>
 			@CookieDomainList(records)
 			<section class="settings-section">
-				<h2 class="settings-heading">Очистка</h2>
+				<h2 class="settings-h2">Очистка</h2>
 				<p class="settings-hint">
 					Безвозвратно удаляет из базы данных и с диска все неудачные загрузки, скрытые задания
 					и записи потерянных файлов. Действие необратимо.
 				</p>
 				<div class="settings-actions">
 					<button
-						class="m3-btn m3-btn-danger"
+						class="btn btn-danger btn-sm"
 						hx-post="settings/cleanup"
 						hx-target="#cleanup-result"
 						hx-swap="innerHTML"
-						hx-confirm="Удалить все мёртвые записи? Это действие необратимо."
 					>
-						<span class="m3-icon">delete_sweep</span>
-						Очистить
+						<span class="mi">delete_sweep</span>Очистить
 					</button>
 				</div>
-				<div id="cleanup-result"></div>
+				<div id="cleanup-result" class="cleanup-result"></div>
 			</section>
 		</div>
 	}
@@ -71,23 +68,22 @@ templ SettingsPage(basePath string, siteName string, records []*model.CookieReco
 
 templ CookieDomainList(records []*model.CookieRecord) {
 	<section id="cookie-domain-list" class="settings-section">
-		<h3 class="settings-subheading">Сохранённые домены</h3>
+		<h3 class="settings-h2">Сохранённые домены</h3>
 		if len(records) == 0 {
 			<p class="settings-empty">Куки не добавлены.</p>
 		} else {
-			<ul class="cookie-domain-list">
+			<ul class="domain-list">
 				for _, rec := range records {
-					<li class="cookie-domain-item">
-						<span class="cookie-domain-name">{ rec.Domain }</span>
-						<span class="cookie-domain-meta">{ cookieLineCount(rec.Content) }</span>
+					<li class="domain-item">
+						<span class="domain-name">{ rec.Domain }</span>
+						<span class="domain-meta">{ cookieLineCount(rec.Content) }</span>
 						<button
-							class="m3-icon-btn m3-icon-btn-danger"
+							class="icon-btn danger"
 							hx-delete={ "settings/cookies/" + rec.Domain }
 							hx-target="#cookie-domain-list"
 							hx-swap="outerHTML"
-							hx-confirm={ "Удалить куки для " + rec.Domain + "?" }
 							title="Удалить"
-						><span class="m3-icon">delete</span></button>
+						><span class="mi">delete</span></button>
 					</li>
 				}
 			</ul>
@@ -105,7 +101,7 @@ func rtVal(settings, defaults map[string]string, key string) string {
 
 templ RuntimeSettingsSection(basePath string, rtSettings map[string]string, rtDefaults map[string]string) {
 	<section id="runtime-settings-section" class="settings-section">
-		<h2 class="settings-heading">Параметры загрузчика</h2>
+		<h2 class="settings-h2">Параметры загрузчика</h2>
 		<p class="settings-hint">
 			Значения перекрывают конфигурацию без перезапуска. Оставьте поле пустым,
 			чтобы использовать значение из конфига.
@@ -114,10 +110,9 @@ templ RuntimeSettingsSection(basePath string, rtSettings map[string]string, rtDe
 			hx-post="settings/runtime"
 			hx-target="#runtime-settings-section"
 			hx-swap="outerHTML"
-			class="runtime-settings-form"
 		>
-			<div class="runtime-settings-grid">
-				<label class="runtime-label" for="rs-proxy">Прокси yt-dlp</label>
+			<div class="runtime-grid">
+				<span class="runtime-label">Прокси yt-dlp</span>
 				<div class="runtime-field">
 					<input
 						id="rs-proxy"
@@ -129,7 +124,7 @@ templ RuntimeSettingsSection(basePath string, rtSettings map[string]string, rtDe
 					/>
 					<span class="settings-hint">HTTP/SOCKS5 URL, например <code>socks5://127.0.0.1:1080</code></span>
 				</div>
-				<label class="runtime-label" for="rs-extra">Доп. аргументы yt-dlp</label>
+				<span class="runtime-label">Доп. аргументы yt-dlp</span>
 				<div class="runtime-field">
 					<input
 						id="rs-extra"
@@ -141,7 +136,7 @@ templ RuntimeSettingsSection(basePath string, rtSettings map[string]string, rtDe
 					/>
 					<span class="settings-hint">Например: <code>--sponsorblock-remove all --sub-lang ru</code></span>
 				</div>
-				<label class="runtime-label" for="rs-format">Формат вывода</label>
+				<span class="runtime-label">Формат вывода</span>
 				<div class="runtime-field">
 					<input
 						id="rs-format"
@@ -153,26 +148,26 @@ templ RuntimeSettingsSection(basePath string, rtSettings map[string]string, rtDe
 					/>
 					<span class="settings-hint">mp4, mkv, webm и т.д.</span>
 				</div>
-				<label class="runtime-label" for="rs-maxfiles">Лимит файлов в плейлисте</label>
+				<span class="runtime-label">Лимит файлов в плейлисте</span>
 				<div class="runtime-field">
 					<input
 						id="rs-maxfiles"
 						type="number"
 						name="yt_dlp_max_files"
-						class="runtime-input runtime-input-narrow"
+						class="runtime-input runtime-narrow"
 						value={ rtSettings["yt_dlp_max_files"] }
 						placeholder={ rtDefaults["yt_dlp_max_files"] }
 						min="0"
 					/>
 					<span class="settings-hint">0 — без лимита</span>
 				</div>
-				<label class="runtime-label" for="rs-timeout">Таймаут загрузки (с)</label>
+				<span class="runtime-label">Таймаут загрузки (с)</span>
 				<div class="runtime-field">
 					<input
 						id="rs-timeout"
 						type="number"
 						name="yt_dlp_timeout"
-						class="runtime-input runtime-input-narrow"
+						class="runtime-input runtime-narrow"
 						value={ rtSettings["yt_dlp_timeout"] }
 						placeholder={ rtDefaults["yt_dlp_timeout"] }
 						min="30"
@@ -181,9 +176,8 @@ templ RuntimeSettingsSection(basePath string, rtSettings map[string]string, rtDe
 				</div>
 			</div>
 			<div class="settings-actions">
-				<button type="submit" class="m3-btn m3-btn-filled">
-					<span class="m3-icon">save</span>
-					Сохранить
+				<button type="submit" class="btn btn-primary btn-sm">
+					<span class="mi">save</span>Сохранить
 				</button>
 			</div>
 		</form>

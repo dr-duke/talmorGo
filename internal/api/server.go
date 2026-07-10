@@ -58,17 +58,18 @@ func New(
 	staticSub, _ := fs.Sub(web.StaticFiles, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 
-	// Главная страница → медиатека.
+	// Главная страница — рендерим с коллекциями для сайдбара.
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		templ.Handler(templates.Index(basePath, siteName)).ServeHTTP(w, r)
+		cols, _ := collections.List(r.Context())
+		templ.Handler(templates.Index(basePath, siteName, cols)).ServeHTTP(w, r)
 	})
 
-	// Медиатека: коллекции + items.
-	mux.HandleFunc("GET /library", mh.Library)
+	// Медиатека: сайдбар, items, теги.
+	mux.HandleFunc("GET /library/sidebar", mh.LibrarySidebar)
 	mux.HandleFunc("GET /library/items", mh.LibraryItems)
 	mux.HandleFunc("GET /library/tags", mh.TagsFragment)
 
@@ -103,6 +104,8 @@ func New(
 	// Очередь.
 	mux.HandleFunc("POST /queue", qh.Add)
 	mux.HandleFunc("DELETE /queue/{id}", qh.Delete)
+	mux.HandleFunc("POST /queue/cancel-all", qh.CancelAll)
+	mux.HandleFunc("GET /queue/items", qh.Items)
 	mux.HandleFunc("POST /jobs/{id}/retry", qh.Retry)
 
 	// Настройки.
