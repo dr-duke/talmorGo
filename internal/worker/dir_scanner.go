@@ -24,27 +24,33 @@ var mediaExtensions = map[string]bool{
 	".ogg": true, ".aac": true, ".wma": true,
 }
 
-// DirScanner периодически сканирует директорию скачивания (рекурсивно) и регистрирует
-// медиафайлы, не привязанные ни к одному заданию, с source="filesystem".
-type DirScanner struct {
-	jobs     repo.JobRepo
-	files    repo.FileRepo
-	dir      string
-	interval time.Duration
-	inFlight *InFlightPaths // nil означает «не отслеживать»
+func kindFromExt(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".mp3", ".m4a", ".opus", ".flac", ".wav", ".ogg", ".aac", ".wma":
+		return "audio"
+	default:
+		return "video"
+	}
 }
 
-func NewDirScanner(jobs repo.JobRepo, files repo.FileRepo, dir string, intervalSec int, inFlight *InFlightPaths) *DirScanner {
+type DirScanner struct {
+	jobs     repo.JobRepo
+	items    repo.ItemRepo
+	dir      string
+	interval time.Duration
+	inFlight *InFlightPaths
+}
+
+func NewDirScanner(jobs repo.JobRepo, items repo.ItemRepo, dir string, intervalSec int, inFlight *InFlightPaths) *DirScanner {
 	return &DirScanner{
 		jobs:     jobs,
-		files:    files,
+		items:    items,
 		dir:      dir,
 		interval: time.Duration(intervalSec) * time.Second,
 		inFlight: inFlight,
 	}
 }
 
-// Start запускает периодическое сканирование. interval == 0 → выключено.
 func (s *DirScanner) Start(ctx context.Context) {
 	if s.interval == 0 {
 		return
@@ -63,7 +69,7 @@ func (s *DirScanner) Start(ctx context.Context) {
 }
 
 func (s *DirScanner) scan(ctx context.Context) {
-	known, err := s.files.AllPaths(ctx)
+	known, err := s.items.AllPaths(ctx)
 	if err != nil {
 		slog.Error("dir-scanner: get known paths", "err", err)
 		return
@@ -72,7 +78,7 @@ func (s *DirScanner) scan(ctx context.Context) {
 	imported := 0
 	walkErr := filepath.WalkDir(s.dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // пропускаем недоступные пути
+			return nil
 		}
 		if d.IsDir() {
 			if path != s.dir && strings.HasPrefix(d.Name(), ".") {
@@ -83,7 +89,6 @@ func (s *DirScanner) scan(ctx context.Context) {
 		if strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
-		// пропускаем временные файлы yt-dlp в процессе скачивания
 		if strings.HasSuffix(d.Name(), ".part") || strings.HasSuffix(d.Name(), ".ytdl") {
 			return nil
 		}
@@ -91,10 +96,10 @@ func (s *DirScanner) scan(ctx context.Context) {
 			return nil
 		}
 		if _, ok := known[path]; ok {
-			return nil // уже известен в БД
+			return nil
 		}
 		if s.inFlight != nil && s.inFlight.Contains(path) {
-			return nil // воркер уже обрабатывает этот файл
+			return nil
 		}
 		info, infoErr := d.Info()
 		if infoErr != nil {
@@ -104,7 +109,7 @@ func (s *DirScanner) scan(ctx context.Context) {
 			slog.Error("dir-scanner: import file", "path", path, "err", importErr)
 		} else {
 			imported++
-			known[path] = struct{}{} // не импортировать повторно в одном проходе
+			known[path] = struct{}{}
 		}
 		return nil
 	})
@@ -116,7 +121,6 @@ func (s *DirScanner) scan(ctx context.Context) {
 	}
 }
 
-// importFile создаёт synthetic job + file для найденного файла.
 func (s *DirScanner) importFile(ctx context.Context, path, name string, size int64) error {
 	job := &model.Job{
 		URL:    "local",
@@ -127,15 +131,12 @@ func (s *DirScanner) importFile(ctx context.Context, path, name string, size int
 	if err := s.jobs.Create(ctx, job); err != nil {
 		return err
 	}
-	f := &model.File{
+	item := &model.Item{
 		JobID: job.ID,
+		Kind:  kindFromExt(name),
 		Path:  path,
 		Name:  name,
 		Size:  size,
 	}
-	if err := s.files.Create(ctx, f); err != nil {
-		return err
-	}
-	job.FileID = f.ID
-	return s.jobs.Update(ctx, job)
+	return s.items.Create(ctx, item)
 }

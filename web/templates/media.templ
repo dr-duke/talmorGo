@@ -7,52 +7,141 @@ import (
 	"github.com/dr-duke/talmorGo/internal/model"
 )
 
-templ MediaTab(items []*model.MediaItem, tagCounts []*model.TagWithCount) {
-	<!-- Скрытая форма для передачи состояния фильтра в HTMX-запросы -->
-	<form id="filter-form" style="display:none">
-		<input id="filter-q" name="q" type="hidden"/>
-	</form>
+// LibraryPage — главный экран с сайдбаром: навигация + коллекции + список.
+templ LibraryPage(cols []*model.Collection) {
+	<div class="library-layout">
+		<!-- ── Боковая панель ── -->
+		<aside class="sidebar">
+			<!-- Форма добавления URL -->
+			<form class="add-form" hx-post="queue" hx-swap="none" hx-on::after-request="if(event.detail.successful)this.reset()">
+				<input
+					type="url"
+					name="url"
+					placeholder="Вставьте ссылку…"
+					autocomplete="off"
+					required
+				/>
+				<button type="submit" class="m3-btn m3-btn-filled">
+					<span class="m3-icon">download</span>
+					Скачать
+				</button>
+			</form>
 
-	<!-- Три вкладки -->
-	<div id="tab-video" class="tab-panel">
-		<form class="add-form" hx-post="queue" hx-swap="none" hx-on::after-request="if(event.detail.successful)this.reset()">
-			<input
-				type="url"
-				name="url"
-				placeholder="Вставьте ссылку на видео…"
-				autocomplete="off"
-				required
-			/>
-			<button type="submit" class="m3-btn m3-btn-filled">
-				<span class="m3-icon">download</span>
-				Скачать
-			</button>
-		</form>
-		<div class="filter-bar">
-			<input
-				type="search"
-				id="media-search"
-				class="m3-search"
-				placeholder="Поиск по названию, URL, домену…"
-				oninput="onSearchInput(this)"
-			/>
-			<div class="tag-filter-row">
-				<div id="status-chips"></div>
-				@TagCloud(tagCounts)
+			<!-- Kind-навигация -->
+			<nav class="sidebar-kind-nav">
+				<button class="sidebar-nav-item active" data-kind="" onclick="setKindFilter(this,'')">
+					<span class="m3-icon" style="font-size:18px">list</span>Все
+				</button>
+				<button class="sidebar-nav-item" data-kind="video" onclick="setKindFilter(this,'video')">
+					<span class="m3-icon" style="font-size:18px">videocam</span>Видео
+				</button>
+				<button class="sidebar-nav-item" data-kind="audio" onclick="setKindFilter(this,'audio')">
+					<span class="m3-icon" style="font-size:18px">audio_file</span>Аудио
+				</button>
+			</nav>
+
+			<!-- Коллекции -->
+			if len(cols) > 0 {
+				<div class="sidebar-section">
+					<span class="sidebar-section-label">Коллекции</span>
+					for _, c := range cols {
+						<button
+							class="sidebar-coll-item"
+							data-collection-name={ c.Name }
+							onclick="switchToCollectionTag(this.dataset.collectionName)"
+							title={ c.Name }
+						>
+							<span class="m3-icon" style="font-size:16px">folder</span>
+							<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{ c.Name }</span>
+							if c.ItemCount > 0 {
+								<span class="sidebar-count">{ strconv.Itoa(c.ItemCount) }</span>
+							}
+						</button>
+					}
+				</div>
+			}
+		</aside>
+
+		<!-- ── Основная зона ── -->
+		<div class="library-main">
+			<!-- Скрытая форма для HTMX-фильтров -->
+			<form id="filter-form" style="display:none">
+				<input id="filter-q" name="q" type="hidden"/>
+				<input id="filter-kind" name="kind" type="hidden"/>
+			</form>
+
+			<!-- Фильтр-бар: поиск + теги -->
+			<div class="filter-bar">
+				<input
+					type="search"
+					id="media-search"
+					class="m3-search"
+					placeholder="Поиск по названию, URL, домену…"
+					oninput="onSearchInput(this)"
+				/>
+				<div class="tag-filter-row">
+					<div id="status-chips"></div>
+					@TagCloud(nil)
+				</div>
+			</div>
+
+			<!-- Play-all бар (показывается при выборе коллекции) -->
+			<div id="play-all-bar" class="play-all-bar" style="display:none">
+				<span class="m3-icon" style="color:var(--m3-primary)">folder</span>
+				<span class="play-all-title"></span>
+				<button class="m3-btn m3-btn-sm m3-btn-filled" onclick="playAll()">
+					<span class="m3-icon">play_arrow</span>Воспроизвести всё
+				</button>
+			</div>
+
+			<!-- Список элементов (lazy load) -->
+			<div
+				id="media-inner"
+				hx-get="library/items"
+				hx-trigger="load, mediaRefresh from:body"
+				hx-swap="outerHTML"
+				hx-include="#filter-form"
+			>
+				<div class="m3-empty">
+					<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">hourglass_empty</span>
+					<p>Загрузка…</p>
+				</div>
 			</div>
 		</div>
-		@MediaList(items)
 	</div>
 
-	<div id="tab-audio" class="tab-panel" style="display:none">
-		<div id="audio-inner" hx-get="audio/list" hx-trigger="audioRefresh from:body" hx-swap="outerHTML">
+	@ActionBar()
+}
+
+// ItemList — HTMX-фрагмент: список медиаэлементов с пагинацией и фильтрацией.
+templ ItemList(items []*model.MediaItem, tagCounts []*model.TagWithCount, f model.MediaFilter) {
+	<div
+		id="media-inner"
+		hx-get="library/items"
+		hx-trigger="mediaRefresh from:body"
+		hx-swap="outerHTML"
+		hx-include="#filter-form"
+	>
+		if len(items) == 0 {
 			<div class="m3-empty">
-				<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">hourglass_empty</span>
-				<p>Загрузка…</p>
+				<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">video_library</span>
+				<p>Медиатека пуста</p>
 			</div>
-		</div>
+		} else {
+			<div class="media-list">
+				for _, item := range items {
+					@mediaRow(item)
+				}
+			</div>
+		}
 	</div>
+}
 
+// MediaTab — легаси-вкладка (используется для совместимости).
+templ MediaTab(items []*model.MediaItem, tagCounts []*model.TagWithCount) {
+	<div id="tab-video" class="tab-panel">
+		@LibraryPage(nil)
+	</div>
 	<div id="tab-collections" class="tab-panel" style="display:none">
 		<div id="collections-inner" hx-get="collections/cards" hx-trigger="collectionsRefresh from:body" hx-swap="outerHTML">
 			<div class="m3-empty">
@@ -61,27 +150,31 @@ templ MediaTab(items []*model.MediaItem, tagCounts []*model.TagWithCount) {
 			</div>
 		</div>
 	</div>
-
 	@ActionBar()
 }
 
 templ TagCloud(tagCounts []*model.TagWithCount) {
-	<div id="tag-cloud" hx-get="media/tags" hx-trigger="tagsRefresh from:body" hx-swap="outerHTML">
-		for _, t := range tagCounts {
+	<div id="tag-cloud" hx-get="library/tags" hx-trigger="tagsRefresh from:body, load once" hx-swap="outerHTML">
+		for i, t := range tagCounts {
 			if t.IsCollection {
 				<button
-					class="m3-chip m3-chip-collection-tag"
+					class={ "m3-chip", "m3-chip-collection-tag", templ.KV("tag-extra", i >= 5) }
 					data-tag={ t.Name }
 					onclick="toggleUserTag(this)"
 					title={ "Коллекция: " + t.Name }
 				><span class="m3-icon" style="font-size:14px;vertical-align:middle">folder</span> { t.Name } <span class="chip-count">{ strconv.Itoa(t.Count) }</span></button>
 			} else {
 				<button
-					class="m3-chip"
+					class={ "m3-chip", templ.KV("tag-extra", i >= 5) }
 					data-tag={ t.Name }
 					onclick="toggleUserTag(this)"
 				>{ t.Name } <span class="chip-count">{ strconv.Itoa(t.Count) }</span></button>
 			}
+		}
+		if len(tagCounts) > 5 {
+			<button class="m3-chip tag-expand-btn" id="tag-expand-btn" onclick="expandTags()">
+				+{ strconv.Itoa(len(tagCounts) - 5) } ещё
+			</button>
 		}
 	</div>
 }
@@ -110,7 +203,7 @@ templ ActionBar() {
 templ MediaList(items []*model.MediaItem) {
 	<div
 		id="media-inner"
-		hx-get="media/list"
+		hx-get="library/items"
 		hx-trigger="mediaRefresh from:body"
 		hx-swap="outerHTML"
 		hx-include="#filter-form"
@@ -139,9 +232,12 @@ templ mediaRow(item *model.MediaItem) {
 		data-domain={ item.Job.Domain() }
 		data-tags={ joinTagsWithStatus(item.EffectiveStatus(), item.Tags) }
 		if rowAvailable(item) {
-			data-stream={ fmt.Sprintf("files/%s/stream", item.File.ID) }
-			onclick="rowClick(event, this)"
-			style="cursor:pointer"
+			data-stream={ fmt.Sprintf("items/%s/stream", item.Item.ID) }
+			data-kind={ item.Item.Kind }
+			if item.Item.IsVideo() {
+				onclick="rowClick(event, this)"
+				style="cursor:pointer"
+			}
 		}
 	>
 		<label class="row-select" onclick="event.stopPropagation()">
@@ -149,20 +245,24 @@ templ mediaRow(item *model.MediaItem) {
 		</label>
 		<div class="media-main">
 			<div class="media-title">
-				<img
-					class="favicon"
-					src={ fmt.Sprintf("https://www.google.com/s2/favicons?domain=%s&sz=16", item.Job.Domain()) }
-					width="16"
-					height="16"
-					onerror="this.style.visibility='hidden'"
-					loading="lazy"
-				/>
+				if rowAvailable(item) && item.Item.IsAudio() {
+					<span class="m3-icon" style="font-size:16px;color:var(--m3-primary);flex-shrink:0">audio_file</span>
+				} else {
+					<img
+						class="favicon"
+						src={ fmt.Sprintf("https://www.google.com/s2/favicons?domain=%s&sz=16", item.Job.Domain()) }
+						width="16"
+						height="16"
+						onerror="this.style.visibility='hidden'"
+						loading="lazy"
+					/>
+				}
 				<span class="title-text">{ item.DisplayTitle() }</span>
 			</div>
 			<div class="media-meta">
 				<span class="domain-label">{ shortDomain(item.Job.Domain()) }</span>
 				if rowAvailable(item) {
-					<span class="meta-size">{ formatSize(item.File.Size) }</span>
+					<span class="meta-size">{ formatSize(item.Item.Size) }</span>
 				}
 				if item.Job.Status == model.JobRetrying && item.Job.NextRetryAt != nil {
 					<span class="meta-retry">{ retryIn(item.Job.NextRetryAt) }</span>
@@ -210,7 +310,6 @@ templ mediaRow(item *model.MediaItem) {
 						class="m3-icon-btn m3-icon-btn-danger"
 						hx-delete={ fmt.Sprintf("queue/%s", item.Job.ID) }
 						hx-swap="none"
-						hx-confirm="Отменить задачу?"
 						title="Отменить"
 					><span class="m3-icon">cancel</span></button>
 				case "retry":
@@ -221,19 +320,28 @@ templ mediaRow(item *model.MediaItem) {
 						title="Повторить"
 					><span class="m3-icon">replay</span></button>
 				case "play":
-					<button
-						class="m3-icon-btn"
-						data-stream={ fmt.Sprintf("files/%s/stream", item.File.ID) }
-						data-title={ item.DisplayTitle() }
-						onclick="openPlayer(this.dataset.stream, this.dataset.title)"
-						title="Смотреть"
-					><span class="m3-icon">play_circle</span></button>
+					if item.Item.IsAudio() {
+						<button
+							class="m3-icon-btn"
+							data-stream={ fmt.Sprintf("items/%s/stream", item.Item.ID) }
+							data-title={ item.DisplayTitle() }
+							onclick="openAudioPlayer(this.dataset.stream, this.dataset.title)"
+							title="Слушать"
+						><span class="m3-icon">play_circle</span></button>
+					} else {
+						<button
+							class="m3-icon-btn"
+							data-stream={ fmt.Sprintf("items/%s/stream", item.Item.ID) }
+							data-title={ item.DisplayTitle() }
+							onclick="openPlayer(this.dataset.stream, this.dataset.title)"
+							title="Смотреть"
+						><span class="m3-icon">play_circle</span></button>
+					}
 				case "redownload":
 					<button
 						class="m3-icon-btn"
 						hx-post={ fmt.Sprintf("jobs/%s/redownload", item.Job.ID) }
 						hx-swap="none"
-						hx-confirm="Скачать заново?"
 						title="Скачать повторно"
 					><span class="m3-icon">refresh</span></button>
 			}
@@ -243,26 +351,26 @@ templ mediaRow(item *model.MediaItem) {
 					if rowAvailable(item) {
 						<a
 							class="row-menu-item"
-							href={ templ.SafeURL(fmt.Sprintf("files/%s/stream", item.File.ID)) }
+							href={ templ.SafeURL(fmt.Sprintf("items/%s/stream", item.Item.ID)) }
 							target="_blank"
 							title="Открыть в новой вкладке"
 						><span class="m3-icon">open_in_new</span>Открыть в новой вкладке</a>
 						<a
 							class="row-menu-item"
-							href={ templ.SafeURL(fmt.Sprintf("files/%s/stream?download=true", item.File.ID)) }
+							href={ templ.SafeURL(fmt.Sprintf("items/%s/stream?download=true", item.Item.ID)) }
 							title="Скачать"
 						><span class="m3-icon">download</span>Скачать</a>
 						<button
 							class="row-menu-item"
-							data-file-id={ item.File.ID }
-							onclick="copyPresigned(this.dataset.fileId, this)"
+							data-item-id={ item.Item.ID }
+							onclick="copyPresigned(this.dataset.itemId, this)"
 							title="Постоянная ссылка"
 						><span class="m3-icon">link</span>Постоянная ссылка</button>
 						<button
 							class="row-menu-item"
-							data-file-id={ item.File.ID }
-							data-name={ item.File.Name }
-							onclick="renamePrompt(this.dataset.fileId, this.dataset.name)"
+							data-item-id={ item.Item.ID }
+							data-name={ item.Item.Name }
+							onclick="renamePrompt(this.dataset.itemId, this.dataset.name)"
 							title="Переименовать"
 						><span class="m3-icon">edit</span>Переименовать</button>
 					}
@@ -288,25 +396,24 @@ templ mediaRow(item *model.MediaItem) {
 							class="row-menu-item"
 							hx-post={ fmt.Sprintf("jobs/%s/redownload", item.Job.ID) }
 							hx-swap="none"
-							hx-confirm="Скачать заново?"
 							title="Скачать повторно"
 						><span class="m3-icon">refresh</span>Скачать повторно</button>
 					}
-					if rowAvailable(item) && item.File.IsVideo() {
+					if rowAvailable(item) && item.Item.IsVideo() {
 						<button
 							class="row-menu-item"
-							hx-post={ fmt.Sprintf("files/%s/extract-audio", item.File.ID) }
+							hx-post={ fmt.Sprintf("items/%s/extract-audio", item.Item.ID) }
 							hx-swap="none"
-							title="Извлечь аудиодорожку в папку audio"
+							title="Извлечь аудиодорожку"
 						><span class="m3-icon">audio_file</span>Извлечь аудио</button>
 					}
 					if rowAvailable(item) {
 						<div class="row-menu-divider"></div>
 						<button
 							class="row-menu-item danger"
-							hx-delete={ fmt.Sprintf("files/%s", item.File.ID) }
-							hx-swap="none"
-							hx-confirm={ fmt.Sprintf("Удалить файл %s? Ссылка сохранится.", item.DisplayTitle()) }
+							data-item-id={ item.Item.ID }
+							data-title={ item.DisplayTitle() }
+							onclick="deleteFile(this.dataset.itemId, this.dataset.title)"
 							title="Удалить файл"
 						><span class="m3-icon">delete</span>Удалить файл</button>
 					}
@@ -321,7 +428,6 @@ templ mediaRow(item *model.MediaItem) {
 							class="row-menu-item danger"
 							hx-delete={ fmt.Sprintf("jobs/%s", item.Job.ID) }
 							hx-swap="none"
-							hx-confirm="Удалить навсегда? Восстановить будет невозможно."
 							title="Удалить навсегда"
 						><span class="m3-icon">delete_forever</span>Удалить навсегда</button>
 					} else {
@@ -329,7 +435,6 @@ templ mediaRow(item *model.MediaItem) {
 							class="row-menu-item danger"
 							hx-post={ fmt.Sprintf("jobs/%s/hide", item.Job.ID) }
 							hx-swap="none"
-							hx-confirm="Убрать с главной? Запись сохранится в «скрытых»."
 							title="Скрыть"
 						><span class="m3-icon">visibility_off</span>Скрыть</button>
 					}
@@ -348,7 +453,7 @@ func joinTagsWithStatus(status string, tags []string) string {
 }
 
 func rowAvailable(it *model.MediaItem) bool {
-	return it.File != nil && it.File.IsAvailable()
+	return it.Item != nil && it.Item.IsAvailable()
 }
 
 func rowIsActive(it *model.MediaItem) bool {

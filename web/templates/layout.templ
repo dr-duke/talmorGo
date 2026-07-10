@@ -212,6 +212,7 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 					min-width: 210px; padding: .35rem; z-index: 30;
 					background: var(--m3-surface-hi); border: 1px solid var(--m3-outline-var);
 					border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,.55);
+					max-height: 70vh; overflow-y: auto;
 				}
 				.row-menu.open { display: flex; }
 				.row-menu-item {
@@ -453,6 +454,77 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 				.audio-size { font-size: .75rem; color: var(--m3-on-surface-var); }
 				.audio-actions { display: flex; gap: .2rem; align-items: center; }
 
+				/* ── Sidebar + Library layout ── */
+				.library-layout { display: flex; align-items: flex-start; min-height: calc(100vh - 56px); }
+				.sidebar {
+					width: 220px; flex-shrink: 0;
+					border-right: 1px solid var(--m3-outline-var);
+					padding: .5rem 0;
+					position: sticky; top: 0; max-height: calc(100vh - 56px); overflow-y: auto;
+				}
+				.sidebar .add-form {
+					flex-direction: column; gap: .4rem;
+					padding: .5rem .75rem .75rem; margin-bottom: .25rem;
+					border-bottom: 1px solid var(--m3-outline-var);
+				}
+				.sidebar .add-form input { width: 100%; box-sizing: border-box; min-width: 0; }
+				.sidebar .add-form button { align-self: stretch; justify-content: center; }
+				.sidebar-kind-nav { padding: .25rem 0; }
+				.sidebar-nav-item {
+					display: flex; align-items: center; gap: .5rem;
+					width: calc(100% - .5rem); padding: .5rem .75rem;
+					background: transparent; border: none; cursor: pointer;
+					color: var(--m3-on-surface-var); font-size: .875rem;
+					border-radius: 0 24px 24px 0; margin-right: .5rem;
+					transition: background .15s, color .15s; text-align: left;
+				}
+				.sidebar-nav-item:hover { background: var(--m3-surface-var); color: var(--m3-on-surface); }
+				.sidebar-nav-item.active { background: var(--m3-primary); color: var(--m3-on-primary); font-weight: 600; }
+				.sidebar-section { margin-top: .25rem; border-top: 1px solid var(--m3-outline-var); padding-top: .25rem; }
+				.sidebar-section-label {
+					display: block; padding: .4rem .75rem .25rem;
+					font-size: .68rem; font-weight: 700; text-transform: uppercase;
+					letter-spacing: .09em; color: var(--m3-on-surface-var); opacity: .55;
+				}
+				.sidebar-coll-item {
+					display: flex; align-items: center; gap: .4rem;
+					width: calc(100% - .5rem); padding: .4rem .75rem;
+					background: transparent; border: none; cursor: pointer;
+					color: var(--m3-on-surface-var); font-size: .85rem;
+					border-radius: 0 24px 24px 0; margin-right: .5rem;
+					transition: background .15s, color .15s; text-align: left;
+				}
+				.sidebar-coll-item:hover { background: rgba(202,192,255,.1); color: var(--m3-primary); }
+				.sidebar-coll-item.active { background: var(--m3-primary); color: var(--m3-on-primary); }
+				.sidebar-count { font-size: .7rem; opacity: .65; margin-left: auto; padding-left: .3rem; }
+				.library-main { flex: 1; min-width: 0; padding-left: 1px; }
+				/* ── Tag expansion ── */
+				.tag-extra { display: none !important; }
+				.tag-cloud-expanded .tag-extra { display: inline-flex !important; }
+				.tag-cloud-expanded .tag-expand-btn { display: none !important; }
+				.tag-expand-btn { font-style: italic; opacity: .7; border-style: dashed; }
+				/* ── Play-all bar ── */
+				.play-all-bar {
+					display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+					padding: .45rem .75rem; margin-bottom: .6rem;
+					background: var(--m3-surface); border: 1px solid var(--m3-primary);
+					border-radius: 12px; font-size: .875rem;
+				}
+				.play-all-title { font-weight: 600; color: var(--m3-primary); }
+				/* ── Mobile ── */
+				@media (max-width: 767px) {
+					.library-layout { flex-direction: column; }
+					.sidebar {
+						width: 100%; border-right: none;
+						border-bottom: 1px solid var(--m3-outline-var);
+						position: static; max-height: none; overflow-y: visible;
+					}
+					.sidebar .add-form { flex-direction: row; }
+					.sidebar-kind-nav { display: flex; flex-direction: row; overflow-x: auto; }
+					.sidebar-nav-item { border-radius: 0; white-space: nowrap; min-width: auto; width: auto; }
+					.sidebar-section { display: none; }
+				}
+
 				/* ── Collections tab ── */
 				.collections-toolbar { margin-bottom: 1rem; }
 				.collection-grid {
@@ -591,12 +663,40 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 			</dialog>
 
 			<script>
+				// ── Playlist state ──
+				var _playlist = [];
+				var _playlistIdx = 0;
+
+				function playPlaylistItem(idx) {
+					if (idx < 0 || idx >= _playlist.length) return;
+					_playlistIdx = idx;
+					var item = _playlist[idx];
+					if (item.kind === 'audio') {
+						openAudioPlayer(item.url, item.title);
+					} else {
+						openPlayer(item.url, item.title);
+					}
+				}
+
+				function playAll() {
+					var rows = Array.from(document.querySelectorAll('.media-row[data-stream]'))
+						.filter(function(r) { return r.style.display !== 'none'; });
+					_playlist = rows.map(function(r) {
+						return { url: r.dataset.stream, title: r.dataset.title || r.dataset.url, kind: r.dataset.kind || 'video' };
+					});
+					_playlistIdx = 0;
+					if (_playlist.length > 0) playPlaylistItem(0);
+				}
+
 				// ── Plyr (video) ──
 				var plyrInstance;
 				document.addEventListener('DOMContentLoaded', function() {
 					plyrInstance = new Plyr('#plyr-video', {
 						controls: ['play-large','play','progress','current-time','duration','mute','volume','fullscreen'],
 						ratio: '16:9',
+					});
+					plyrInstance.on('ended', function() {
+						if (_playlistIdx + 1 < _playlist.length) playPlaylistItem(_playlistIdx + 1);
 					});
 				});
 
@@ -608,6 +708,7 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 				}
 				document.getElementById('player-dialog').addEventListener('close', function() {
 					try { plyrInstance.pause(); } catch(e) {}
+					_playlist = []; _playlistIdx = 0;
 				});
 				function closePlayer() { document.getElementById('player-dialog').close(); }
 				document.getElementById('player-dialog').addEventListener('click', function(e) {
@@ -631,6 +732,10 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 				});
 				document.getElementById('audio-dialog').addEventListener('close', function() {
 					document.getElementById('audio-player').pause();
+					_playlist = []; _playlistIdx = 0;
+				});
+				document.getElementById('audio-player').addEventListener('ended', function() {
+					if (_playlistIdx + 1 < _playlist.length) playPlaylistItem(_playlistIdx + 1);
 				});
 
 				// ── Metadata dialog ──
@@ -645,7 +750,7 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 				}
 				function saveMeta() {
 					var id = document.getElementById('meta-audio-id').value;
-					fetch('audio/' + id, {
+					fetch('items/' + id + '/meta', {
 						method: 'PATCH',
 						headers: {'Content-Type': 'application/json'},
 						body: JSON.stringify({
@@ -706,13 +811,6 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 					}
 				}
 
-				// audioRefresh reloads audio tab content
-				document.body.addEventListener('audioRefresh', function() {
-					if (_tabLoaded.audio) {
-						htmx.ajax('GET', 'audio/list', {target: '#audio-inner', swap: 'outerHTML'});
-					}
-				});
-
 				// collectionsRefresh reloads collections tab content
 				document.body.addEventListener('collectionsRefresh', function() {
 					if (_tabLoaded.collections) {
@@ -722,7 +820,7 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 
 				// ── File ops ──
 				function renameFile(id, newName) {
-					fetch('files/' + id, {
+					fetch('items/' + id, {
 						method: 'PATCH',
 						headers: {'Content-Type': 'application/json'},
 						body: JSON.stringify({name: newName}),
@@ -735,7 +833,7 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 					if (n && n.trim()) renameFile(id, n.trim());
 				}
 				function copyPresigned(id, btn) {
-					fetch('files/' + id + '/link', {method: 'POST'})
+					fetch('items/' + id + '/link', {method: 'POST'})
 						.then(function(r) { return r.json(); })
 						.then(function(d) {
 							navigator.clipboard.writeText(d.url).then(function() {
@@ -743,6 +841,11 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 								if (icon) { icon.textContent = 'check'; setTimeout(function() { icon.textContent = 'link'; }, 1500); }
 							});
 						});
+				}
+				function deleteFile(id, title) {
+					fetch('items/' + id, { method: 'DELETE' }).then(function() {
+						document.body.dispatchEvent(new CustomEvent('mediaRefresh'));
+					});
 				}
 				function copyOriginalURL(url) { navigator.clipboard.writeText(url); }
 
@@ -833,19 +936,28 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 					}
 				}
 
-				// Переключиться на вкладку Видео с активным тегом коллекции.
+				// Переключиться в режим коллекции: сайдбар + play-all бар.
 				function switchToCollectionTag(name) {
+					// Деактивировать kind-nav в сайдбаре.
+					document.querySelectorAll('.sidebar-nav-item[data-kind]').forEach(function(b){ b.classList.remove('active'); });
+					// Активировать нужную коллекцию.
+					document.querySelectorAll('.sidebar-coll-item').forEach(function(b){
+						b.classList.toggle('active', b.dataset.collectionName === name);
+					});
+					// Показать play-all бар с именем коллекции.
+					var pb = document.getElementById('play-all-bar');
+					if (pb) {
+						pb.style.display = '';
+						var nt = pb.querySelector('.play-all-title');
+						if (nt) nt.textContent = name;
+					}
+					// Обнулить kind-фильтр, установить тег коллекции.
+					var ki = document.getElementById('filter-kind');
+					if (ki) ki.value = '';
 					_activeTags.clear();
 					_activeTags.add(name);
-					switchTab('video');
-					// Обновить активные чипы после переключения.
-					setTimeout(function() {
-						document.querySelectorAll('#tag-cloud .m3-chip').forEach(function(b) {
-							b.classList.toggle('active', b.dataset.tag === name);
-						});
-						triggerServerFilter();
-						applyFilters();
-					}, 50);
+					_activeStatus = null;
+					triggerServerFilter();
 				}
 
 				function applyFilters() {
@@ -938,7 +1050,6 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 
 				function bulkHide() {
 					if (_selectedIds.size === 0) return;
-					if (!confirm('Скрыть ' + _selectedIds.size + ' элемент(ов)?')) return;
 					fetch('media/bulk-hide', {
 						method: 'POST',
 						headers: {'Content-Type': 'application/json'},
@@ -1047,13 +1158,34 @@ templ Layout(title string, basePath string, siteName string, isSettings bool) {
 				}
 
 				function deleteCollection(id) {
-					if (!confirm('Удалить коллекцию? Видео останутся.')) return;
 					fetch('collections/' + id, {method: 'DELETE'}).then(function(r) {
 						if (r.ok) {
 							document.body.dispatchEvent(new CustomEvent('collectionsRefresh'));
 							document.body.dispatchEvent(new CustomEvent('tagsRefresh'));
 						}
 					});
+				}
+
+				// ── Kind filter (sidebar) ──
+				function setKindFilter(btn, kind) {
+					// Обновить активность кнопок в сайдбаре.
+					document.querySelectorAll('.sidebar-nav-item[data-kind]').forEach(function(b){
+						b.classList.toggle('active', b === btn);
+					});
+					// Сбросить фильтр коллекции.
+					document.querySelectorAll('.sidebar-coll-item').forEach(function(b){ b.classList.remove('active'); });
+					var pb = document.getElementById('play-all-bar');
+					if (pb) pb.style.display = 'none';
+					_activeTags.clear();
+					_activeStatus = null;
+					var inp = document.getElementById('filter-kind');
+					if (inp) inp.value = kind;
+					triggerServerFilter();
+				}
+
+				function expandTags() {
+					var cloud = document.getElementById('tag-cloud');
+					if (cloud) cloud.classList.add('tag-cloud-expanded');
 				}
 
 				// Клик строки открывает плеер только если не кликнули чекбокс/кнопку.

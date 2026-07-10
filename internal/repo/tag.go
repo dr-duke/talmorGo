@@ -25,16 +25,16 @@ func (r *sqliteTagRepo) Upsert(ctx context.Context, name string) (*model.Tag, er
 	if err != nil {
 		return nil, err
 	}
-	row := r.db.QueryRowContext(ctx, `SELECT id, name FROM tags WHERE name=?`, name)
+	row := r.db.QueryRowContext(ctx, `SELECT id, name, kind FROM tags WHERE name=?`, name)
 	var t model.Tag
-	if err := row.Scan(&t.ID, &t.Name); err != nil {
+	if err := row.Scan(&t.ID, &t.Name, &t.Kind); err != nil {
 		return nil, err
 	}
 	return &t, nil
 }
 
 func (r *sqliteTagRepo) ListAll(ctx context.Context) ([]*model.Tag, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, name FROM tags ORDER BY name`)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, name, kind FROM tags ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func (r *sqliteTagRepo) ListAll(ctx context.Context) ([]*model.Tag, error) {
 	var tags []*model.Tag
 	for rows.Next() {
 		var t model.Tag
-		if err := rows.Scan(&t.ID, &t.Name); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Kind); err != nil {
 			return nil, err
 		}
 		tags = append(tags, &t)
@@ -57,9 +57,16 @@ func (r *sqliteTagRepo) AddToJob(ctx context.Context, jobID, tagID string) error
 }
 
 func (r *sqliteTagRepo) RemoveFromJob(ctx context.Context, jobID, tagName string) error {
-	_, err := r.db.ExecContext(ctx,
+	if _, err := r.db.ExecContext(ctx,
 		`DELETE FROM job_tags WHERE job_id=? AND tag_id=(SELECT id FROM tags WHERE name=?)`,
-		jobID, tagName)
+		jobID, tagName); err != nil {
+		return err
+	}
+	// Удаляем тег если он больше ни к чему не привязан (коллекции не трогаем).
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM tags WHERE name=? AND kind='plain'
+		 AND id NOT IN (SELECT DISTINCT tag_id FROM job_tags)`,
+		tagName)
 	return err
 }
 
@@ -71,6 +78,7 @@ func (r *sqliteTagRepo) ListWithCount(ctx context.Context) ([]*model.TagWithCoun
 		LEFT JOIN job_tags jt ON jt.tag_id = t.id
 		LEFT JOIN collections c ON c.name = t.name
 		GROUP BY t.id
+		HAVING cnt > 0 OR t.kind = 'collection'
 		ORDER BY is_coll DESC, cnt DESC, t.name ASC
 	`)
 	if err != nil {

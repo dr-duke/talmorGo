@@ -9,24 +9,21 @@ import (
 	"github.com/dr-duke/talmorGo/internal/repo"
 )
 
-// FileChecker периодически проверяет, что скачанные файлы присутствуют на диске.
-// Если файл исчез — ставит статус lost; если появился снова — сбрасывает его.
+// FileChecker периодически проверяет, что медиаэлементы присутствуют на диске.
 type FileChecker struct {
-	files    repo.FileRepo
+	items    repo.ItemRepo
 	interval time.Duration
 }
 
-func NewFileChecker(files repo.FileRepo, intervalSec int) *FileChecker {
+func NewFileChecker(items repo.ItemRepo, intervalSec int) *FileChecker {
 	return &FileChecker{
-		files:    files,
+		items:    items,
 		interval: time.Duration(intervalSec) * time.Second,
 	}
 }
 
 func (c *FileChecker) Start(ctx context.Context) {
-	// Первая проверка сразу после старта.
 	c.check(ctx)
-
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
 	for {
@@ -40,28 +37,28 @@ func (c *FileChecker) Start(ctx context.Context) {
 }
 
 func (c *FileChecker) check(ctx context.Context) {
-	files, err := c.files.ListAll(ctx)
+	items, err := c.items.ListAll(ctx)
 	if err != nil {
-		slog.Error("checker: list files", "err", err)
+		slog.Error("checker: list items", "err", err)
 		return
 	}
 	lost, found := 0, 0
-	for _, f := range files {
-		if f.IsDeleted() {
+	for _, item := range items {
+		if item.IsDeleted() {
 			continue
 		}
-		_, statErr := os.Stat(f.Path)
+		_, statErr := os.Stat(item.Path)
 		missing := os.IsNotExist(statErr)
 
-		if missing && !f.IsLost() {
-			if err := c.files.MarkLost(ctx, f.ID); err != nil {
-				slog.Error("checker: mark lost", "id", f.ID, "err", err)
+		if missing && !item.IsLost() {
+			if err := c.items.MarkLost(ctx, item.ID); err != nil {
+				slog.Error("checker: mark lost", "id", item.ID, "err", err)
 			} else {
 				lost++
 			}
-		} else if !missing && f.IsLost() {
-			if err := c.files.MarkFound(ctx, f.ID); err != nil {
-				slog.Error("checker: mark found", "id", f.ID, "err", err)
+		} else if !missing && item.IsLost() {
+			if err := c.items.MarkFound(ctx, item.ID); err != nil {
+				slog.Error("checker: mark found", "id", item.ID, "err", err)
 			} else {
 				found++
 			}

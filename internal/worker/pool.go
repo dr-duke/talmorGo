@@ -19,31 +19,28 @@ import (
 	"github.com/dr-duke/talmorGo/internal/sse"
 )
 
-// NotifKind определяет тип уведомления.
 type NotifKind uint8
 
 const (
-	NotifJobStarted  NotifKind = iota // задание взято в работу → редактируем сообщение очереди
-	NotifFileDone                     // файл скачан → новое сообщение-карточка
-	NotifJobDone                      // все файлы готово → удаляем сообщение очереди
-	NotifJobFailed                    // задание окончательно упало → редактируем сообщение
-	NotifJobRetrying                  // запланирован повтор → редактируем сообщение
+	NotifJobStarted  NotifKind = iota
+	NotifFileDone
+	NotifJobDone
+	NotifJobFailed
+	NotifJobRetrying
 )
 
-// Notification — единый тип для всех уведомлений воркера.
 type Notification struct {
 	Kind      NotifKind
 	ChatID    int64
-	MessageID int64  // ID сообщения очереди в Telegram (для редактирования/удаления)
-	JobID     string // для кнопки Stop/Retry
-	JobURL    string // краткий URL для отображения в сообщении очереди
-	FileName  string // NotifFileDone: имя файла
-	Token     string // NotifFileDone: presigned-токен
-	ErrText   string // NotifJobFailed: текст ошибки
-	RetryAt   string // NotifJobRetrying: «через Xm»
+	MessageID int64
+	JobID     string
+	JobURL    string
+	FileName  string
+	Token     string
+	ErrText   string
+	RetryAt   string
 }
 
-// Notifier отправляет уведомления пользователю (реализует Telegram-бот).
 type Notifier interface {
 	Notify(ctx context.Context, n Notification)
 }
@@ -51,23 +48,23 @@ type Notifier interface {
 type Pool struct {
 	cfg          *config.Config
 	jobRepo      repo.JobRepo
-	fileRepo     repo.FileRepo
+	itemRepo     repo.ItemRepo
 	tokenRepo    repo.TokenRepo
-	settingsRepo repo.SettingsRepo // nil допустимо; настройки из БД перекрывают конфиг
+	settingsRepo repo.SettingsRepo
 	notifier     Notifier
 	notify       chan struct{}
 	inFlight     *InFlightPaths
-	hub          *sse.Hub // nil если SSE не используется
+	hub          *sse.Hub
 
 	mu          sync.Mutex
-	cancelFuncs map[string]context.CancelFunc // jobID → cancel активной закачки
+	cancelFuncs map[string]context.CancelFunc
 }
 
-func NewPool(cfg *config.Config, jobRepo repo.JobRepo, fileRepo repo.FileRepo, tokenRepo repo.TokenRepo, notifier Notifier) *Pool {
+func NewPool(cfg *config.Config, jobRepo repo.JobRepo, itemRepo repo.ItemRepo, tokenRepo repo.TokenRepo, notifier Notifier) *Pool {
 	return &Pool{
 		cfg:         cfg,
 		jobRepo:     jobRepo,
-		fileRepo:    fileRepo,
+		itemRepo:    itemRepo,
 		tokenRepo:   tokenRepo,
 		notifier:    notifier,
 		notify:      make(chan struct{}, cfg.WorkerCount),
@@ -76,7 +73,7 @@ func NewPool(cfg *config.Config, jobRepo repo.JobRepo, fileRepo repo.FileRepo, t
 	}
 }
 
-func (p *Pool) SetHub(h *sse.Hub)               { p.hub = h }
+func (p *Pool) SetHub(h *sse.Hub)                    { p.hub = h }
 func (p *Pool) SetSettingsRepo(sr repo.SettingsRepo) { p.settingsRepo = sr }
 
 func (p *Pool) broadcast() {
@@ -85,11 +82,8 @@ func (p *Pool) broadcast() {
 	}
 }
 
-// InFlight возвращает набор путей, активно обрабатываемых воркерами.
-// Используется DirScanner для исключения файлов в процессе закачки.
 func (p *Pool) InFlight() *InFlightPaths { return p.inFlight }
 
-// CancelJob прерывает активно скачиваемый job. Возвращает true если job был running.
 func (p *Pool) CancelJob(jobID string) bool {
 	p.mu.Lock()
 	fn, ok := p.cancelFuncs[jobID]
@@ -103,8 +97,6 @@ func (p *Pool) CancelJob(jobID string) bool {
 	return ok
 }
 
-// moveFile перемещает файл src→dst. Сначала пробует атомарный rename (один ФС),
-// при ошибке кросс-устройства — копирование с последующим удалением исходника.
 func moveFile(src, dst string) error {
 	if err := os.Rename(src, dst); err == nil {
 		return nil
@@ -142,7 +134,6 @@ func (p *Pool) Start(ctx context.Context) {
 	if err := p.jobRepo.ResetStale(ctx); err != nil {
 		slog.Error("worker: reset stale jobs", "err", err)
 	}
-	// Чистим staging от незавершённых загрузок прошлых запусков (после краха).
 	if err := os.RemoveAll(p.cfg.StagingDir()); err != nil {
 		slog.Warn("worker: clean staging dir", "dir", p.cfg.StagingDir(), "err", err)
 	}
@@ -184,7 +175,6 @@ func (p *Pool) tgJob(job *model.Job) bool {
 }
 
 func (p *Pool) process(ctx context.Context, job *model.Job) {
-	// Per-job контекст: CancelJob() вызывает cancel() и убивает yt-dlp процесс.
 	jobCtx, cancel := context.WithCancel(ctx)
 	p.mu.Lock()
 	p.cancelFuncs[job.ID] = cancel
@@ -194,11 +184,11 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		delete(p.cancelFuncs, job.ID)
 		p.mu.Unlock()
 		cancel()
-		p.broadcast() // уведомляем клиентов о завершении (done/failed/retrying)
+		p.broadcast()
 	}()
 
 	slog.Info("worker: processing job", "id", job.ID, "url", job.URL, "attempt", job.RetryCount+1)
-	p.broadcast() // уведомляем клиентов о старте (pending → running)
+	p.broadcast()
 
 	if p.tgJob(job) {
 		p.notifier.Notify(ctx, Notification{
@@ -210,19 +200,17 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		})
 	}
 
-	// Скачиваем в изолированную per-job staging-папку вне зоны сканирования,
-	// затем перемещаем готовый файл в OutputDir. Сканер не видит файл в процессе закачки.
 	jobStaging := filepath.Join(p.cfg.StagingDir(), job.ID)
 	if err := os.MkdirAll(jobStaging, 0o755); err != nil {
 		slog.Error("worker: create staging dir", "dir", jobStaging, "err", err)
 		p.handleFailure(ctx, job, fmt.Errorf("create staging dir: %w", err))
 		return
 	}
-	defer os.RemoveAll(jobStaging) // чистим staging при любом исходе
+	defer os.RemoveAll(jobStaging)
 
 	opts := p.resolveOpts(ctx, jobStaging)
 
-	var firstFile *model.File
+	var firstItem *model.Item
 	var lastErr error
 	fileCount := 0
 
@@ -239,8 +227,6 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 			continue
 		}
 
-		// Перемещаем готовый файл из staging в OutputDir под защитой inFlight:
-		// сканер пропускает путь, пока он не окажется в БД.
 		finalPath := filepath.Join(p.cfg.YtDlpOutputDir, event.FileName)
 		p.inFlight.Add(finalPath)
 		if err := moveFile(event.Path, finalPath); err != nil {
@@ -257,42 +243,39 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 			continue
 		}
 
-		f := &model.File{
+		item := &model.Item{
 			JobID: job.ID,
+			Kind:  "video",
 			Path:  finalPath,
 			Name:  event.FileName,
 			Size:  info.Size(),
 		}
-		if err := p.fileRepo.Create(ctx, f); err != nil {
+		if err := p.itemRepo.Create(ctx, item); err != nil {
 			p.inFlight.Remove(finalPath)
-			slog.Error("worker: save file record", "err", err)
+			slog.Error("worker: save item record", "err", err)
 			continue
 		}
-		// Путь теперь в БД — AllPaths его видит; убираем из inFlight.
 		p.inFlight.Remove(finalPath)
-		slog.Info("worker: file saved", "name", f.Name, "id", f.ID)
-		p.broadcast() // файл появился в БД — уведомляем клиентов немедленно
+		slog.Info("worker: item saved", "name", item.Name, "id", item.ID)
+		p.broadcast()
 		fileCount++
-		if firstFile == nil {
-			firstFile = f
+		if firstItem == nil {
+			firstItem = item
 		}
 
-		// Отправляем карточку файла в Telegram сразу после сохранения.
 		if p.tgJob(job) && p.tokenRepo != nil {
-			if tok, err := p.tokenRepo.Upsert(ctx, f.ID); err == nil {
+			if tok, err := p.tokenRepo.Upsert(ctx, item.ID); err == nil {
 				p.notifier.Notify(ctx, Notification{
 					Kind:     NotifFileDone,
 					ChatID:   job.ChatID,
 					JobID:    job.ID,
-					FileName: f.Name,
+					FileName: item.Name,
 					Token:    tok.Token,
 				})
 			}
 		}
 	}
 
-	// Если контекст отменён — пользователь нажал «Отменить».
-	// Незавершённые файлы лежат в jobStaging и удаляются defer-ом os.RemoveAll.
 	if jobCtx.Err() != nil {
 		job.Status = model.JobCancelled
 		if err := p.jobRepo.Update(ctx, job); err != nil {
@@ -302,21 +285,19 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		return
 	}
 
-	if lastErr != nil && firstFile == nil {
+	if lastErr != nil && firstItem == nil {
 		p.handleFailure(ctx, job, lastErr)
 		return
 	}
 
 	job.Status = model.JobDone
-	if firstFile != nil {
-		job.FileID = firstFile.ID
-		job.Title = firstFile.Name
+	if firstItem != nil {
+		job.Title = firstItem.Name
 	}
 	if err := p.jobRepo.Update(ctx, job); err != nil {
 		slog.Error("worker: update job done", "err", err)
 	}
 
-	// Удаляем сообщение очереди — карточки файлов уже отправлены.
 	if p.tgJob(job) {
 		p.notifier.Notify(ctx, Notification{
 			Kind:      NotifJobDone,
@@ -388,7 +369,6 @@ func (p *Pool) handleFailure(ctx context.Context, job *model.Job, lastErr error)
 	}
 }
 
-// resolveOpts строит Options для yt-dlp, перекрывая значения конфига настройками из БД.
 func (p *Pool) resolveOpts(ctx context.Context, outputDir string) downloader.Options {
 	proxy := p.cfg.YtDlpProxy
 	outputFormat := p.cfg.YtDlpOutputFormat

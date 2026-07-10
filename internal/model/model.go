@@ -2,22 +2,20 @@ package model
 
 import (
 	"net/url"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
 type JobStatus string
 
 const (
-	JobChecking  JobStatus = "checking"  // временный: yt-dlp проверяет не плейлист ли URL
+	JobChecking  JobStatus = "checking"  // yt-dlp проверяет, не плейлист ли URL
 	JobPending   JobStatus = "pending"
 	JobRunning   JobStatus = "running"
 	JobRetrying  JobStatus = "retrying"
 	JobDone      JobStatus = "done"
 	JobFailed    JobStatus = "failed"
 	JobCancelled JobStatus = "cancelled"
-	JobImported  JobStatus = "imported"  // файл найден сканером на диске, не скачан ботом
+	JobImported  JobStatus = "imported" // файл найден сканером, не скачан ботом
 )
 
 type Job struct {
@@ -25,7 +23,6 @@ type Job struct {
 	URL           string
 	Status        JobStatus
 	Title         string
-	FileID        string
 	Error         string
 	Source        string // "web" | "telegram"
 	ChatID        int64
@@ -45,7 +42,6 @@ func (j *Job) DisplayName() string {
 	return j.URL
 }
 
-// Domain извлекает hostname из URL задания.
 func (j *Job) Domain() string {
 	u, err := url.Parse(j.URL)
 	if err != nil || u.Host == "" {
@@ -54,47 +50,52 @@ func (j *Job) Domain() string {
 	return u.Hostname()
 }
 
-type File struct {
+// AudioMeta — ID3-метаданные аудиоэлемента.
+type AudioMeta struct {
+	Title  string
+	Artist string
+	Album  string
+	Year   string
+	Genre  string
+}
+
+// Item — унифицированный медиаэлемент (видео или аудио).
+type Item struct {
 	ID        string
 	JobID     string
+	Kind      string // "video" | "audio"
 	Path      string
 	Name      string
 	Size      int64
+	Duration  int // секунды
+	Meta      AudioMeta
 	CreatedAt time.Time
 	DeletedAt *time.Time
 	LostAt    *time.Time
 }
 
-func (f *File) IsLost() bool    { return f.LostAt != nil }
-func (f *File) IsDeleted() bool { return f.DeletedAt != nil }
-func (f *File) IsAvailable() bool {
-	return f.DeletedAt == nil && f.LostAt == nil
-}
+func (i *Item) IsLost() bool      { return i.LostAt != nil }
+func (i *Item) IsDeleted() bool   { return i.DeletedAt != nil }
+func (i *Item) IsAvailable() bool { return i.DeletedAt == nil && i.LostAt == nil }
+func (i *Item) IsAudio() bool     { return i.Kind == "audio" }
+func (i *Item) IsVideo() bool     { return i.Kind == "video" }
 
-func (f *File) IsVideo() bool {
-	switch strings.ToLower(filepath.Ext(f.Name)) {
-	case ".mp4", ".mkv", ".webm", ".avi", ".mov", ".ts", ".m4v", ".wmv":
-		return true
-	}
-	return false
-}
-
-// MediaItem — объединённое представление задания и (опционально) файла.
+// MediaItem — объединённое представление задания и (опционально) медиаэлемента.
 type MediaItem struct {
 	Job  *Job
-	File *File  // nil пока файл не скачан
+	Item *Item  // nil пока файл не скачан
 	Tags []string
 }
 
-// EffectiveStatus возвращает статус с учётом состояния файла и флага скрытия.
+// EffectiveStatus возвращает статус с учётом состояния элемента и флага скрытия.
 func (m *MediaItem) EffectiveStatus() string {
 	if m.Job.Hidden {
 		return "hidden"
 	}
-	if m.File != nil && m.File.LostAt != nil {
+	if m.Item != nil && m.Item.LostAt != nil {
 		return "missing"
 	}
-	if m.File != nil && m.File.DeletedAt != nil && (m.Job.Status == JobDone || m.Job.Status == JobImported) {
+	if m.Item != nil && m.Item.DeletedAt != nil && (m.Job.Status == JobDone || m.Job.Status == JobImported) {
 		return "deleted"
 	}
 	return string(m.Job.Status)
@@ -102,8 +103,8 @@ func (m *MediaItem) EffectiveStatus() string {
 
 // DisplayTitle возвращает имя файла или заголовок задания.
 func (m *MediaItem) DisplayTitle() string {
-	if m.File != nil && m.File.IsAvailable() {
-		return m.File.Name
+	if m.Item != nil && m.Item.IsAvailable() {
+		return m.Item.Name
 	}
 	if m.Job.Title != "" {
 		return m.Job.Title
@@ -115,70 +116,52 @@ func (m *MediaItem) DisplayTitle() string {
 	return u
 }
 
-// DeletedFile — для GET /files/deleted API.
-type DeletedFile struct {
+// DeletedItem — для GET /items/deleted API.
+type DeletedItem struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
+	Kind        string    `json:"kind"`
 	OriginalURL string    `json:"original_url"`
 	DeletedAt   time.Time `json:"deleted_at"`
 }
 
 type Token struct {
 	Token     string
-	FileID    string
+	ItemID    string
 	CreatedAt time.Time
 }
 
 type Tag struct {
 	ID   string
 	Name string
+	Kind string // "plain" | "collection"
 }
 
-// Collection — именованный набор видео.
+// Collection — именованная коллекция (имя совпадает с именем тега kind='collection').
 type Collection struct {
 	ID        string
 	Name      string
 	CreatedAt time.Time
-	JobCount  int // заполняется репозиторием
+	ItemCount int // заполняется репозиторием
 }
 
-// TagWithCount — тег с количеством привязанных заданий (для облака тегов).
+// TagWithCount — тег с количеством привязанных заданий.
 type TagWithCount struct {
 	Name         string
 	Count        int
-	IsCollection bool // тег является именем коллекции
+	IsCollection bool
 }
 
 // MediaFilter — параметры серверной фильтрации медиатеки.
 type MediaFilter struct {
 	Query string   // текстовый поиск (имя файла, URL, заголовок)
-	Tags  []string // AND-пересечение тегов (включая коллекции по имени)
+	Kind  string   // "" | "video" | "audio"
+	Tags  []string // AND-пересечение тегов (включая коллекции)
 }
 
-// AudioMeta — ID3-метаданные аудиофайла.
-type AudioMeta struct {
-	Title  string
-	Artist string
-	Album  string
-	Year   string
-	Genre  string
-}
-
-// AudioFile — аудиодорожка, извлечённая из видео через ffmpeg.
-type AudioFile struct {
-	ID        string
-	JobID     string
-	FileID    string // пусто если исходный File удалён
-	Path      string
-	Name      string
-	Size      int64
-	AudioMeta        // Title, Artist, Album, Year, Genre
-	CreatedAt time.Time
-}
-
-// CookieRecord — куки одного домена (Netscape-формат), хранимые в БД.
+// CookieRecord — куки одного домена (Netscape-формат).
 type CookieRecord struct {
 	Domain    string
-	Content   string // Netscape-строки для этого домена
+	Content   string
 	UpdatedAt string
 }

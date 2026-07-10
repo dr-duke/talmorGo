@@ -41,23 +41,22 @@ func main() {
 	slog.Info("db opened", "path", cfg.DBPath)
 
 	jobRepo := repo.NewJobRepo(database)
-	fileRepo := repo.NewFileRepo(database)
+	itemRepo := repo.NewItemRepo(database)
 	tokenRepo := repo.NewTokenRepo(database)
 	tagRepo := repo.NewTagRepo(database)
 	cookieRepo := repo.NewCookieRepo(database)
 	settingsRepo := repo.NewSettingsRepo(database)
 	collectionRepo := repo.NewCollectionRepo(database)
-	audioRepo := repo.NewAudioRepo(database)
 
 	hub := sse.New()
 
-	pool := worker.NewPool(cfg, jobRepo, fileRepo, tokenRepo, nil)
+	pool := worker.NewPool(cfg, jobRepo, itemRepo, tokenRepo, nil)
 	pool.SetHub(hub)
 	pool.SetSettingsRepo(settingsRepo)
 
 	var tgBot *bot.Bot
 	if cfg.TelegramBotToken != "" {
-		tgBot, err = bot.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, pool)
+		tgBot, err = bot.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, pool)
 		if err != nil {
 			slog.Warn("bot init failed, running without telegram", "err", err)
 		} else {
@@ -68,14 +67,14 @@ func main() {
 	}
 
 	store := storage.New(cfg.YtDlpOutputDir)
-	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, settingsRepo, collectionRepo, audioRepo, store, pool, hub)
+	srv := api.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, cookieRepo, settingsRepo, collectionRepo, store, pool, hub)
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPHost + ":" + cfg.HTTPPort,
 		Handler: srv.Handler(),
 	}
 
-	checker := worker.NewFileChecker(fileRepo, cfg.FileCheckInterval)
-	dirScanner := worker.NewDirScanner(jobRepo, fileRepo, cfg.YtDlpOutputDir, cfg.DirScanInterval, pool.InFlight())
+	checker := worker.NewFileChecker(itemRepo, cfg.FileCheckInterval)
+	dirScanner := worker.NewDirScanner(jobRepo, itemRepo, cfg.YtDlpOutputDir, cfg.DirScanInterval, pool.InFlight())
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

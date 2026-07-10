@@ -17,9 +17,8 @@ func NewTokenRepo(db *sql.DB) TokenRepo {
 	return &sqliteTokenRepo{db: db}
 }
 
-func (r *sqliteTokenRepo) Upsert(ctx context.Context, fileID string) (*model.Token, error) {
-	// Сначала проверяем, есть ли уже токен для этого файла.
-	existing, err := r.getByFileID(ctx, fileID)
+func (r *sqliteTokenRepo) Upsert(ctx context.Context, itemID string) (*model.Token, error) {
+	existing, err := r.getByItemID(ctx, itemID)
 	if err == nil {
 		return existing, nil
 	}
@@ -29,12 +28,12 @@ func (r *sqliteTokenRepo) Upsert(ctx context.Context, fileID string) (*model.Tok
 
 	t := &model.Token{
 		Token:     uuid.NewString(),
-		FileID:    fileID,
+		ItemID:    itemID,
 		CreatedAt: time.Now().UTC(),
 	}
 	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO tokens (token, file_id, created_at) VALUES (?, ?, ?)`,
-		t.Token, t.FileID, t.CreatedAt.Format(time.RFC3339Nano),
+		`INSERT INTO tokens (token, item_id, created_at) VALUES (?, ?, ?)`,
+		t.Token, t.ItemID, t.CreatedAt.Format(time.RFC3339Nano),
 	)
 	if err != nil {
 		return nil, err
@@ -44,20 +43,20 @@ func (r *sqliteTokenRepo) Upsert(ctx context.Context, fileID string) (*model.Tok
 
 func (r *sqliteTokenRepo) GetByToken(ctx context.Context, token string) (*model.Token, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT token, file_id, created_at FROM tokens WHERE token=?`, token)
+		`SELECT token, item_id, created_at FROM tokens WHERE token=?`, token)
 	return scanToken(row)
 }
 
-func (r *sqliteTokenRepo) getByFileID(ctx context.Context, fileID string) (*model.Token, error) {
+func (r *sqliteTokenRepo) getByItemID(ctx context.Context, itemID string) (*model.Token, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT token, file_id, created_at FROM tokens WHERE file_id=?`, fileID)
+		`SELECT token, item_id, created_at FROM tokens WHERE item_id=?`, itemID)
 	return scanToken(row)
 }
 
 func scanToken(s scanner) (*model.Token, error) {
 	var t model.Token
 	var createdAt string
-	if err := s.Scan(&t.Token, &t.FileID, &createdAt); err != nil {
+	if err := s.Scan(&t.Token, &t.ItemID, &createdAt); err != nil {
 		return nil, err
 	}
 	t.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)

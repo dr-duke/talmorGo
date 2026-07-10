@@ -19,7 +19,7 @@ type SettingsHandler struct {
 	Cookies  repo.CookieRepo
 	Settings repo.SettingsRepo
 	Jobs     repo.JobRepo
-	Files    repo.FileRepo
+	Items    repo.ItemRepo
 	Storage  *storage.Storage
 	Cfg      *config.Config
 	SiteName string
@@ -163,7 +163,7 @@ func (h *SettingsHandler) rewriteFile(ctx context.Context) error {
 func (h *SettingsHandler) Cleanup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	paths, err := h.Files.PathsForCleanup(ctx)
+	paths, err := h.Items.PathsForCleanup(ctx)
 	if err != nil {
 		slog.Error("settings: cleanup paths", "err", err)
 	}
@@ -178,7 +178,7 @@ func (h *SettingsHandler) Cleanup(w http.ResponseWriter, r *http.Request) {
 		slog.Error("settings: cleanup dead jobs", "err", err)
 	}
 
-	nFiles, err := h.Files.PruneLost(ctx)
+	nFiles, err := h.Items.PruneLost(ctx)
 	if err != nil {
 		slog.Error("settings: prune lost files", "err", err)
 	}

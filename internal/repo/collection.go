@@ -22,7 +22,7 @@ func NewCollectionRepo(db *sql.DB) CollectionRepo {
 func (r *sqliteCollectionRepo) List(ctx context.Context) ([]*model.Collection, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT c.id, c.name, c.created_at,
-		       COUNT(jt.job_id) AS job_count
+		       COUNT(jt.job_id) AS item_count
 		FROM collections c
 		LEFT JOIN tags t ON t.name = c.name
 		LEFT JOIN job_tags jt ON jt.tag_id = t.id
@@ -37,7 +37,7 @@ func (r *sqliteCollectionRepo) List(ctx context.Context) ([]*model.Collection, e
 	for rows.Next() {
 		var c model.Collection
 		var createdAt string
-		if err := rows.Scan(&c.ID, &c.Name, &createdAt, &c.JobCount); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &createdAt, &c.ItemCount); err != nil {
 			return nil, err
 		}
 		c.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)

@@ -312,12 +312,12 @@ func (b *Bot) sendMediaList(ctx context.Context, chatID int64, header string, it
 		sb.WriteString(fmt.Sprintf("\n%d. <b>%s</b>\n   🌐 %s%s\n",
 			i+1, escapeHTML(title), domain, tags))
 
-		if item.File == nil || !item.File.IsAvailable() {
+		if item.Item == nil || !item.Item.IsAvailable() {
 			continue
 		}
-		tok, err := b.tokens.Upsert(ctx, item.File.ID)
+		tok, err := b.tokens.Upsert(ctx, item.Item.ID)
 		if err != nil {
-			slog.Error("bot: upsert token", "file_id", item.File.ID, "err", err)
+			slog.Error("bot: upsert token", "item_id", item.Item.ID, "err", err)
 			continue
 		}
 		label := fmt.Sprintf("%d. %s", i+1, truncate(item.DisplayTitle(), 18))

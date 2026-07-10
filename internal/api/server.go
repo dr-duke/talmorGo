@@ -25,13 +25,12 @@ type Server struct {
 func New(
 	cfg *config.Config,
 	jobs repo.JobRepo,
-	files repo.FileRepo,
+	items repo.ItemRepo,
 	tokens repo.TokenRepo,
 	tags repo.TagRepo,
 	cookies repo.CookieRepo,
 	settings repo.SettingsRepo,
 	collections repo.CollectionRepo,
-	audio repo.AudioRepo,
 	store *storage.Storage,
 	pool handler.Enqueuer,
 	hub *sse.Hub,
@@ -46,21 +45,20 @@ func New(
 
 	qh := &handler.QueueHandler{Jobs: jobs, Tags: tags, Pool: pool, Cfg: cfg, Settings: settings, Expander: expander}
 	mh := &handler.MediaHandler{
-		Jobs: jobs, Files: files, Tags: tags,
+		Jobs: jobs, Items: items, Tags: tags,
 		Tokens: tokens, Storage: store,
 		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg, Settings: settings,
-		Collections: collections, Audio: audio, Expander: expander,
+		Collections: collections, Expander: expander,
 	}
 	ch := &handler.CollectionHandler{Collections: collections}
-	ah := &handler.AudioHandler{Audio: audio}
-	lh := &handler.LinkHandler{Tokens: tokens, Files: files}
-	sh := &handler.SettingsHandler{Cookies: cookies, Settings: settings, Jobs: jobs, Files: files, Storage: store, Cfg: cfg, SiteName: siteName}
+	lh := &handler.LinkHandler{Tokens: tokens, Items: items}
+	sh := &handler.SettingsHandler{Cookies: cookies, Settings: settings, Jobs: jobs, Items: items, Storage: store, Cfg: cfg, SiteName: siteName}
 
 	// Статика.
 	staticSub, _ := fs.Sub(web.StaticFiles, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 
-	// Главная страница.
+	// Главная страница → медиатека.
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -69,14 +67,21 @@ func New(
 		templ.Handler(templates.Index(basePath, siteName)).ServeHTTP(w, r)
 	})
 
-	// Медиатека — объединённый список (заменяет /queue + /files).
-	mux.HandleFunc("GET /media", mh.Page)
-	mux.HandleFunc("GET /media/list", mh.List)
-	mux.HandleFunc("GET /files/deleted", mh.ListDeleted)
-	mux.HandleFunc("GET /files/{id}/stream", mh.Stream)
-	mux.HandleFunc("DELETE /files/{id}", mh.Delete)
-	mux.HandleFunc("PATCH /files/{id}", mh.Rename)
-	mux.HandleFunc("POST /files/{id}/link", mh.CreateLink)
+	// Медиатека: коллекции + items.
+	mux.HandleFunc("GET /library", mh.Library)
+	mux.HandleFunc("GET /library/items", mh.LibraryItems)
+	mux.HandleFunc("GET /library/tags", mh.TagsFragment)
+
+	// Items: стриминг, удаление, переименование, ссылки, аудио.
+	mux.HandleFunc("GET /items/{id}/stream", mh.Stream)
+	mux.HandleFunc("DELETE /items/{id}", mh.Delete)
+	mux.HandleFunc("PATCH /items/{id}", mh.Rename)
+	mux.HandleFunc("PATCH /items/{id}/meta", mh.UpdateMeta)
+	mux.HandleFunc("POST /items/{id}/link", mh.CreateLink)
+	mux.HandleFunc("POST /items/{id}/extract-audio", mh.ExtractAudio)
+	mux.HandleFunc("GET /items/deleted", mh.ListDeleted)
+
+	// Jobs: управление заданиями.
 	mux.HandleFunc("POST /jobs/{id}/redownload", mh.Redownload)
 	mux.HandleFunc("POST /jobs/{id}/hide", mh.Hide)
 	mux.HandleFunc("POST /jobs/{id}/unhide", mh.Unhide)
@@ -84,8 +89,6 @@ func New(
 	mux.HandleFunc("POST /jobs/{id}/tags", mh.AddTag)
 	mux.HandleFunc("DELETE /jobs/{id}/tags/{tag}", mh.RemoveTag)
 	mux.HandleFunc("GET /jobs/{id}/log", mh.Log)
-	mux.HandleFunc("POST /files/{id}/extract-audio", mh.ExtractAudio)
-	mux.HandleFunc("GET /media/tags", mh.TagsFragment)
 	mux.HandleFunc("POST /media/bulk-tag", mh.BulkTag)
 	mux.HandleFunc("POST /media/bulk-hide", mh.BulkHide)
 
@@ -97,13 +100,7 @@ func New(
 	mux.HandleFunc("DELETE /collections/{id}", ch.Delete)
 	mux.HandleFunc("POST /collections/{id}/jobs", ch.AddJobs)
 
-	// Аудио.
-	mux.HandleFunc("GET /audio/list", ah.List)
-	mux.HandleFunc("GET /audio/{id}/stream", ah.Stream)
-	mux.HandleFunc("PATCH /audio/{id}", ah.UpdateMeta)
-	mux.HandleFunc("DELETE /audio/{id}", ah.Delete)
-
-	// Очередь — добавление и управление.
+	// Очередь.
 	mux.HandleFunc("POST /queue", qh.Add)
 	mux.HandleFunc("DELETE /queue/{id}", qh.Delete)
 	mux.HandleFunc("POST /jobs/{id}/retry", qh.Retry)
@@ -115,12 +112,12 @@ func New(
 	mux.HandleFunc("POST /settings/cleanup", sh.Cleanup)
 	mux.HandleFunc("POST /settings/runtime", sh.SaveRuntimeSettings)
 
-	// SSE: клиент подписывается на обновления.
+	// SSE.
 	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no") // nginx: отключить буферизацию
+		w.Header().Set("X-Accel-Buffering", "no")
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -131,7 +128,6 @@ func New(
 		ch, unsub := hub.Subscribe()
 		defer unsub()
 
-		// Первый пинг при подключении.
 		fmt.Fprint(w, "event: ping\ndata: ok\n\n")
 		flusher.Flush()
 
@@ -146,7 +142,7 @@ func New(
 		}
 	})
 
-	// Presigned link (публичный, без auth).
+	// Presigned link (публичный).
 	mux.HandleFunc("GET /f/{token}", lh.Resolve)
 
 	// Health.

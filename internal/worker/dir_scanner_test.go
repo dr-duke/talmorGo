@@ -21,7 +21,7 @@ func TestDirScanner_SkipsStagingDir(t *testing.T) {
 	defer database.Close()
 
 	jobs := repo.NewJobRepo(database)
-	files := repo.NewFileRepo(database)
+	items := repo.NewItemRepo(database)
 
 	// Готовый файл в корне — должен импортироваться.
 	if err := os.WriteFile(filepath.Join(tmp, "ready.mp4"), []byte("x"), 0o644); err != nil {
@@ -36,10 +36,10 @@ func TestDirScanner_SkipsStagingDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := NewDirScanner(jobs, files, tmp, 0, NewInFlightPaths())
+	s := NewDirScanner(jobs, items, tmp, 0, NewInFlightPaths())
 	s.scan(context.Background())
 
-	all, err := files.AllPaths(context.Background())
+	all, err := items.AllPaths(context.Background())
 	if err != nil {
 		t.Fatalf("all paths: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestDirScanner_SkipsInFlight(t *testing.T) {
 	defer database.Close()
 
 	jobs := repo.NewJobRepo(database)
-	files := repo.NewFileRepo(database)
+	items := repo.NewItemRepo(database)
 
 	moving := filepath.Join(tmp, "moving.mp4")
 	if err := os.WriteFile(moving, []byte("x"), 0o644); err != nil {
@@ -75,10 +75,10 @@ func TestDirScanner_SkipsInFlight(t *testing.T) {
 	inflight := NewInFlightPaths()
 	inflight.Add(moving)
 
-	s := NewDirScanner(jobs, files, tmp, 0, inflight)
+	s := NewDirScanner(jobs, items, tmp, 0, inflight)
 	s.scan(context.Background())
 
-	all, _ := files.AllPaths(context.Background())
+	all, _ := items.AllPaths(context.Background())
 	if _, ok := all[moving]; ok {
 		t.Error("in-flight file must NOT be imported")
 	}

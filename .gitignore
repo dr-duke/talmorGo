@@ -5,3 +5,5 @@ CLAUDE.md
 .env*
 # k8s/Helm values с секретами — не коммитим
 50-values.yml.j2
+# Локальные заметки, не для репо
+TODO_ARCH.md

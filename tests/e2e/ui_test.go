@@ -73,7 +73,7 @@ func (p *fakePool) CancelJob(string) bool  { return false }
 type testEnv struct {
 	URL     string
 	Jobs    repo.JobRepo
-	Files   repo.FileRepo
+	Items   repo.ItemRepo
 	Tokens  repo.TokenRepo
 	Tags    repo.TagRepo
 	DataDir string
@@ -92,19 +92,19 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 
 	jobRepo := repo.NewJobRepo(database)
-	fileRepo := repo.NewFileRepo(database)
+	itemRepo := repo.NewItemRepo(database)
 	tokenRepo := repo.NewTokenRepo(database)
 	tagRepo := repo.NewTagRepo(database)
 	cookieRepo := repo.NewCookieRepo(database)
 
 	cfg := &config.Config{BaseURL: "", BasePath: "", SiteName: "TalmorGo"}
-	srv := api.New(cfg, jobRepo, fileRepo, tokenRepo, tagRepo, cookieRepo, repo.NewSettingsRepo(database), repo.NewCollectionRepo(database), repo.NewAudioRepo(database), storage.New(tmpDir), &fakePool{}, sse.New())
+	srv := api.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, cookieRepo, repo.NewSettingsRepo(database), repo.NewCollectionRepo(database), storage.New(tmpDir), &fakePool{}, sse.New())
 	ts := httptest.NewServer(srv.Handler())
 
 	return &testEnv{
 		URL:     ts.URL,
 		Jobs:    jobRepo,
-		Files:   fileRepo,
+		Items:   itemRepo,
 		Tokens:  tokenRepo,
 		Tags:    tagRepo,
 		DataDir: tmpDir,
@@ -134,15 +134,11 @@ func seedDone(t *testing.T, env *testEnv) (jobID, fileID string) {
 	if err := env.Jobs.Create(ctx, job); err != nil {
 		t.Fatalf("create job: %v", err)
 	}
-	f := &model.File{JobID: job.ID, Path: fpath, Name: "Test Video.mp4", Size: 8}
-	if err := env.Files.Create(ctx, f); err != nil {
-		t.Fatalf("create file: %v", err)
+	item := &model.Item{JobID: job.ID, Kind: "video", Path: fpath, Name: "Test Video.mp4", Size: 8}
+	if err := env.Items.Create(ctx, item); err != nil {
+		t.Fatalf("create item: %v", err)
 	}
-	job.FileID = f.ID
-	if err := env.Jobs.Update(ctx, job); err != nil {
-		t.Fatalf("update job.file_id: %v", err)
-	}
-	return job.ID, f.ID
+	return job.ID, item.ID
 }
 
 func seedPending(t *testing.T, env *testEnv) string {
@@ -190,6 +186,12 @@ func openRowMenu() chromedp.Action {
 		chromedp.Click(`[title="Ещё"]`, chromedp.ByQuery),
 		chromedp.Sleep(150 * time.Millisecond),
 	}
+}
+
+// jsClick кликает по элементу через JS — работает для кнопок внутри overflow-контейнеров
+// где chromedp координатный клик не достигает элемента (за границей viewport).
+func jsClick(sel string) chromedp.Action {
+	return chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).click()`, sel), nil)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -377,7 +379,7 @@ func TestDeleteFileUpdatesRow(t *testing.T) {
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
 		autoConfirm,
 		openRowMenu(),
-		chromedp.Click(`[title="Удалить файл"]`, chromedp.ByQuery),
+		jsClick(`[title="Удалить файл"]`),
 		waitForSwap(),
 	)
 	if err != nil {
@@ -415,7 +417,7 @@ func TestRedownloadSetsPending(t *testing.T) {
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
 		autoConfirm,
 		openRowMenu(),
-		chromedp.Click(`[title="Скачать повторно"]`, chromedp.ByQuery),
+		jsClick(`[title="Скачать повторно"]`),
 		waitForSwap(),
 	)
 	if err != nil {
@@ -624,7 +626,7 @@ func TestDeletedFileAllowsRedownload(t *testing.T) {
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
 		autoConfirm,
 		openRowMenu(),
-		chromedp.Click(`[title="Удалить файл"]`, chromedp.ByQuery),
+		jsClick(`[title="Удалить файл"]`),
 		waitForSwap(),
 	)
 	if err != nil {
@@ -786,7 +788,7 @@ func TestTagFilterChipFilters(t *testing.T) {
 
 	err := chromedp.Run(ctx,
 		openMedia(env.URL),
-		chromedp.WaitVisible(`.media-row`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-tag="TagAlpha"]`, chromedp.ByQuery),
 		chromedp.Click(`[data-tag="TagAlpha"]`, chromedp.ByQuery),
 		chromedp.Sleep(200*time.Millisecond),
 	)

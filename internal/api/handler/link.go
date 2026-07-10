@@ -8,10 +8,10 @@ import (
 
 type LinkHandler struct {
 	Tokens repo.TokenRepo
-	Files  repo.FileRepo
+	Items  repo.ItemRepo
 }
 
-// Resolve отдаёт файл по presigned-токену (публичный endpoint, без авторизации).
+// Resolve отдаёт медиаэлемент по presigned-токену (публичный endpoint, без авторизации).
 func (h *LinkHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	t, err := h.Tokens.GetByToken(r.Context(), token)
@@ -19,10 +19,10 @@ func (h *LinkHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	f, err := h.Files.GetByID(r.Context(), t.FileID)
+	item, err := h.Items.GetByID(r.Context(), t.ItemID)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	http.ServeFile(w, r, f.Path)
+	http.ServeFile(w, r, item.Path)
 }

@@ -4,7 +4,7 @@ templ Index(basePath string, siteName string) {
 	@Layout("Медиатека", basePath, siteName, false) {
 		<div
 			id="content"
-			hx-get="media"
+			hx-get="library"
 			hx-trigger="load"
 			hx-swap="innerHTML"
 		></div>

@@ -106,13 +106,20 @@ func TestJobRepo_ResetStale(t *testing.T) {
 	}
 }
 
-func TestFileRepo_CRUD(t *testing.T) {
+func TestItemRepo_CRUD(t *testing.T) {
 	database := openTestDB(t)
-	r := repo.NewFileRepo(database)
+	jobRepo := repo.NewJobRepo(database)
+	r := repo.NewItemRepo(database)
 	ctx := context.Background()
 
-	f := &model.File{Path: "/data/video.mp4", Name: "video.mp4", Size: 1024}
-	if err := r.Create(ctx, f); err != nil {
+	// Item требует существующего job для FK.
+	job := &model.Job{URL: "local", Status: model.JobImported, Source: "filesystem"}
+	if err := jobRepo.Create(ctx, job); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	item := &model.Item{JobID: job.ID, Kind: "video", Path: "/data/video.mp4", Name: "video.mp4", Size: 1024}
+	if err := r.Create(ctx, item); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
@@ -124,40 +131,46 @@ func TestFileRepo_CRUD(t *testing.T) {
 		t.Fatalf("list len: got %d, want 1", len(list))
 	}
 
-	if err := r.Rename(ctx, f.ID, "renamed.mp4", "/data/renamed.mp4"); err != nil {
+	if err := r.Rename(ctx, item.ID, "renamed.mp4", "/data/renamed.mp4"); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
-	got, _ := r.GetByID(ctx, f.ID)
+	got, _ := r.GetByID(ctx, item.ID)
 	if got.Name != "renamed.mp4" {
 		t.Errorf("name after rename: %s", got.Name)
 	}
 
-	if err := r.Delete(ctx, f.ID); err != nil {
-		t.Fatalf("delete: %v", err)
+	if err := r.SoftDelete(ctx, item.ID); err != nil {
+		t.Fatalf("soft delete: %v", err)
 	}
 	// После soft delete запись остаётся, но помечена удалённой.
-	got, _ = r.GetByID(ctx, f.ID)
+	got, _ = r.GetByID(ctx, item.ID)
 	if got.IsAvailable() {
-		t.Errorf("expected file to be unavailable after soft delete")
+		t.Errorf("expected item to be unavailable after soft delete")
 	}
 }
 
 func TestTokenRepo_Upsert(t *testing.T) {
 	database := openTestDB(t)
-	fileRepo := repo.NewFileRepo(database)
+	jobRepo := repo.NewJobRepo(database)
+	itemRepo := repo.NewItemRepo(database)
 	tokenRepo := repo.NewTokenRepo(database)
 	ctx := context.Background()
 
-	f := &model.File{Path: "/data/v.mp4", Name: "v.mp4", Size: 512}
-	if err := fileRepo.Create(ctx, f); err != nil {
-		t.Fatalf("create file: %v", err)
+	job := &model.Job{URL: "local", Status: model.JobImported, Source: "filesystem"}
+	if err := jobRepo.Create(ctx, job); err != nil {
+		t.Fatalf("create job: %v", err)
 	}
 
-	t1, err := tokenRepo.Upsert(ctx, f.ID)
+	item := &model.Item{JobID: job.ID, Kind: "video", Path: "/data/v.mp4", Name: "v.mp4", Size: 512}
+	if err := itemRepo.Create(ctx, item); err != nil {
+		t.Fatalf("create item: %v", err)
+	}
+
+	t1, err := tokenRepo.Upsert(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("upsert 1: %v", err)
 	}
-	t2, err := tokenRepo.Upsert(ctx, f.ID)
+	t2, err := tokenRepo.Upsert(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("upsert 2: %v", err)
 	}
@@ -169,7 +182,54 @@ func TestTokenRepo_Upsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get by token: %v", err)
 	}
-	if got.FileID != f.ID {
-		t.Errorf("file_id mismatch: %s vs %s", got.FileID, f.ID)
+	if got.ItemID != item.ID {
+		t.Errorf("item_id mismatch: %s vs %s", got.ItemID, item.ID)
+	}
+}
+
+func TestTagRepo_PruneOnRemove(t *testing.T) {
+	database := openTestDB(t)
+	jobRepo := repo.NewJobRepo(database)
+	tagRepo := repo.NewTagRepo(database)
+	ctx := context.Background()
+
+	job := &model.Job{URL: "https://example.com/v", Status: model.JobDone, Source: "web"}
+	if err := jobRepo.Create(ctx, job); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	tag, err := tagRepo.Upsert(ctx, "prunable")
+	if err != nil {
+		t.Fatalf("upsert tag: %v", err)
+	}
+	if err := tagRepo.AddToJob(ctx, job.ID, tag.ID); err != nil {
+		t.Fatalf("add tag: %v", err)
+	}
+
+	// Тег должен быть виден в ListWithCount.
+	counts, _ := tagRepo.ListWithCount(ctx)
+	if len(counts) == 0 {
+		t.Fatal("tag should appear before removal")
+	}
+
+	// Удаляем тег с job — он становится сиротой.
+	if err := tagRepo.RemoveFromJob(ctx, job.ID, "prunable"); err != nil {
+		t.Fatalf("remove tag: %v", err)
+	}
+
+	// ListWithCount не должен показывать сиротский тег.
+	counts, _ = tagRepo.ListWithCount(ctx)
+	for _, tw := range counts {
+		if tw.Name == "prunable" {
+			t.Error("orphan tag still shown in ListWithCount after RemoveFromJob")
+		}
+	}
+
+	// Тег физически должен быть удалён из таблицы.
+	all, _ := tagRepo.ListAll(ctx)
+	for _, tg := range all {
+		if tg.Name == "prunable" {
+			t.Error("orphan tag still present in tags table after RemoveFromJob")
+		}
 	}
 }
