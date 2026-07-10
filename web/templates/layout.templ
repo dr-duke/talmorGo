@@ -161,7 +161,6 @@ templ Layout(title string, basePath string, siteName string) {
 				}
 				.header-url-input:focus { border-color: var(--accent); }
 				.header-url-input::placeholder { color: var(--text-3); }
-				@media (max-width: 600px) { .header-url-input { width: 140px; } }
 
 				/* ── Body layout ── */
 				.app-body { display: flex; flex: 1; min-height: 0; }
@@ -420,28 +419,47 @@ templ Layout(title string, basePath string, siteName string) {
 				}
 				#toast.visible { transform: translateX(-50%) translateY(0); opacity: 1; }
 
-				/* ── Mobile sidebar → horizontal chips ── */
+				/* Prevent scrollbar from causing body hscroll */
+				.app-shell { overflow-x: hidden; }
+
+				/* ── Mobile (≤767px) ── */
 				@media (max-width: 767px) {
+					/* Header: logo+tabs+settings on row 1, form full-width on row 2 */
+					.app-header {
+						flex-wrap: wrap;
+						height: auto;
+						padding: .4rem .75rem;
+						gap: .3rem .5rem;
+					}
+					/* Hide logo text so logo icon + tabs + settings fit on one row */
+					.header-logo-name { display: none; }
+					.header-spacer { display: none; }
+					.header-add-form {
+						order: 10;
+						flex: 0 0 100%;
+					}
+					.header-url-input {
+						width: 0; flex: 1; min-width: 0;
+					}
+					/* Sidebar → horizontal scrollable chip bar */
 					.sidebar {
 						width: 100%; height: auto; position: static;
 						border-right: none; border-bottom: 1px solid var(--border);
-						flex-direction: row; overflow-x: auto; overflow-y: visible;
+						flex-direction: row; overflow-x: auto; overflow-y: hidden;
 						padding: .4rem .75rem; gap: .3rem;
+						-webkit-overflow-scrolling: touch;
+						scrollbar-width: none;
 					}
+					.sidebar::-webkit-scrollbar { display: none; }
 					.sidebar-section-label { display: none; }
 					.sidebar-divider { display: none; }
 					.sidebar-nav-item {
 						border-radius: 9999px; margin-right: 0; width: auto;
-						padding: .3rem .75rem; white-space: nowrap;
+						padding: .3rem .75rem; white-space: nowrap; flex-shrink: 0;
 					}
 					.sidebar-count { display: none; }
 					.app-body { flex-direction: column; }
 					.main-content { overflow-y: visible; }
-					.header-url-input { width: 120px; }
-				}
-				@media (max-width: 480px) {
-					.header-url-input { display: none; }
-					.header-add-btn-text { display: none; }
 				}
 			</style>
 		</head>
