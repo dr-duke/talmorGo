@@ -142,11 +142,9 @@ function toggleMenu(evt, btn) {
   openMenu = menu.classList.contains('open') ? menu : null;
 }
 
-document.addEventListener('click', () => {
-  if (openMenu) {
-    openMenu.classList.remove('open');
-    openMenu = null;
-  }
+document.addEventListener('click', (e) => {
+  if (openMenu) { openMenu.classList.remove('open'); openMenu = null; }
+  if (collDropOpen && !e.target.closest('.coll-dropdown-wrap')) closeCollDropdown();
 });
 
 /* ── Sequential playlist ── */
@@ -360,6 +358,25 @@ function bulkHide() {
 /* ── Collection dropdown (bulk) ── */
 let collDropOpen = false;
 
+function closeCollDropdown() {
+  const dd = document.getElementById('coll-dropdown');
+  if (dd) dd.classList.add('hidden');
+  collDropOpen = false;
+}
+
+function renderCollDropdown(cols) {
+  const dd = document.getElementById('coll-dropdown');
+  if (!dd) return;
+  const items = cols.map(c =>
+    `<button class="row-menu-item" onclick="addToCollection('${c.ID}')">${c.Name}</button>`
+  ).join('');
+  const createBtn = `<div class="row-menu-divider"></div>
+    <button class="row-menu-item" onclick="createAndAddToCollection()">
+      <span class="mi">create_new_folder</span>Создать коллекцию…
+    </button>`;
+  dd.innerHTML = items + createBtn;
+}
+
 function toggleCollDropdown() {
   const dd = document.getElementById('coll-dropdown');
   if (!dd) return;
@@ -369,21 +386,14 @@ function toggleCollDropdown() {
     dd.innerHTML = '<div style="padding:.5rem;color:var(--text-2);font-size:.8rem">Загрузка…</div>';
     fetch(base() + 'collections')
       .then(r => r.json())
-      .then(cols => {
-        if (!cols.length) {
-          dd.innerHTML = '<div style="padding:.5rem;color:var(--text-2);font-size:.8rem">Нет коллекций</div>';
-          return;
-        }
-        dd.innerHTML = cols.map(c =>
-          `<button class="row-menu-item" onclick="addToCollection('${c.ID}')">${c.Name}</button>`
-        ).join('');
-      })
+      .then(cols => renderCollDropdown(cols))
       .catch(() => { dd.innerHTML = '<div style="padding:.5rem;color:var(--danger)">Ошибка</div>'; });
   }
 }
 
 function addToCollection(collId) {
   if (!selectedJobs.size) return;
+  closeCollDropdown();
   fetch(base() + 'collections/' + collId + '/jobs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -392,9 +402,20 @@ function addToCollection(collId) {
     if (r.ok) { clearSelection(); const mi=document.getElementById('media-inner'); if(mi) htmx.trigger(mi,'mediaRefresh'); showToast('Добавлено в коллекцию'); }
     else r.text().then(t => showToast('Ошибка: ' + t));
   });
-  const dd = document.getElementById('coll-dropdown');
-  if (dd) dd.classList.add('hidden');
-  collDropOpen = false;
+}
+
+async function createAndAddToCollection() {
+  closeCollDropdown();
+  const name = window.prompt('Название новой коллекции:');
+  if (!name) return;
+  const r = await fetch(base() + 'collections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  if (!r.ok) { showToast('Ошибка создания коллекции'); return; }
+  const col = await r.json();
+  addToCollection(col.ID);
 }
 
 /* ── Status filter (legacy compat + status chip clicks) ── */
@@ -407,9 +428,7 @@ function activateStatusFilter(status) {
 }
 
 /* ── Dialogs: close on backdrop click ── */
-document.addEventListener('click', (e) => {
-  if (e.target.tagName === 'DIALOG') e.target.close();
-});
+document.addEventListener('click', (e) => { if (e.target.tagName === 'DIALOG') e.target.close(); });
 
 /* ── Collection management (sidebar refresh after create/delete) ── */
 document.body.addEventListener('collectionsRefresh', () => {

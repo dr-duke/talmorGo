@@ -283,7 +283,7 @@ func ActionBar() templ.Component {
 			templ_7745c5c3_Var15 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div id=\"action-bar\" class=\"action-bar hidden\"><span id=\"select-count\" class=\"action-bar-count\">0 выбрано</span> <button class=\"btn btn-ghost btn-sm\" onclick=\"bulkTag()\"><span class=\"mi\">label</span>Тег</button><div class=\"coll-dropdown-wrap\"><button class=\"btn btn-ghost btn-sm\" onclick=\"toggleCollDropdown()\"><span class=\"mi\">folder_open</span>В коллекцию</button><div id=\"coll-dropdown\" class=\"coll-dropdown hidden\"></div></div><button class=\"btn btn-ghost btn-sm\" onclick=\"bulkHide()\"><span class=\"mi\">visibility_off</span>Скрыть</button> <button class=\"icon-btn\" onclick=\"clearSelection()\" title=\"Отменить выбор\"><span class=\"mi\">close</span></button></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div id=\"action-bar\" class=\"action-bar hidden\"><span id=\"select-count\" class=\"action-bar-count\">0 выбрано</span> <button class=\"btn btn-ghost btn-sm\" onclick=\"bulkTag()\"><span class=\"mi\">label</span>Тег</button><div class=\"coll-dropdown-wrap\"><button class=\"btn btn-ghost btn-sm\" onclick=\"toggleCollDropdown()\"><span class=\"mi\">folder_open</span>В коллекцию</button><div id=\"coll-dropdown\" class=\"coll-dropdown hidden\"></div></div><button class=\"icon-btn\" onclick=\"bulkHide()\" title=\"Скрыть\"><span class=\"mi\">visibility_off</span></button> <button class=\"icon-btn\" onclick=\"clearSelection()\" title=\"Отменить выбор\"><span class=\"mi\">close</span></button></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
