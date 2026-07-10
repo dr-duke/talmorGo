@@ -17,7 +17,6 @@ function showToast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('visible'), 2800);
 }
 
-/* ── HX-Trigger: showToast event ── */
 document.body.addEventListener('showToast', (e) => {
   showToast(e.detail?.value || '');
 });
@@ -147,104 +146,286 @@ document.addEventListener('click', (e) => {
   if (collDropOpen && !e.target.closest('.coll-dropdown-wrap')) closeCollDropdown();
 });
 
-/* ── Sequential playlist ── */
+/* ════════════════════════════════════════════════════
+   UNIFIED PLAYER
+   ════════════════════════════════════════════════════ */
+
+let plyrPlayer   = null;
+let playerKind   = null;   // 'video' | 'audio' | null
+let _minimizing  = false;  // flag: dialog close triggered by playerMinimize()
+let _closing     = false;  // flag: dialog close triggered by playerClose()
+
+/* ── Playlist (video sequential) ── */
 let playlist = [];
 let playlistIndex = -1;
 
 function buildPlaylist() {
-  return Array.from(document.querySelectorAll('#media-inner .media-row[data-stream][data-kind="video"]'))
-    .map(row => ({ stream: row.dataset.stream, title: row.dataset.title }));
+  return Array.from(
+    document.querySelectorAll('#media-inner .media-row[data-stream][data-kind="video"]')
+  ).map(row => ({ stream: row.dataset.stream, title: row.dataset.title }));
 }
+
+/* ── Entry points ── */
 
 function rowActivate(evt, row) {
   if (evt) evt.stopPropagation();
   if (!row || !row.dataset.stream) return;
-  if (row.dataset.kind === 'audio') {
-    openAudio(row.dataset.stream, row.dataset.title);
-  } else {
-    rowPlay(evt, row);
-  }
+  openMedia(row.dataset.stream, row.dataset.title, row.dataset.kind || 'video');
 }
 
+/* kept for legacy calls */
 function rowPlay(evt, row) {
   if (evt) evt.stopPropagation();
   if (!row || !row.dataset.stream) return;
-  playlist = buildPlaylist();
-  playlistIndex = playlist.findIndex(p => p.stream === row.dataset.stream);
-  if (playlistIndex < 0) playlistIndex = 0;
-  openVideo(row.dataset.stream, row.dataset.title);
+  openMedia(row.dataset.stream, row.dataset.title, 'video');
 }
 
 function playAll() {
   playlist = buildPlaylist();
   playlistIndex = 0;
-  if (playlist.length > 0) openVideo(playlist[0].stream, playlist[0].title);
+  if (playlist.length > 0) openMedia(playlist[0].stream, playlist[0].title, 'video');
 }
 
 function playNext() {
   if (playlistIndex >= 0 && playlistIndex < playlist.length - 1) {
     playlistIndex++;
-    openVideo(playlist[playlistIndex].stream, playlist[playlistIndex].title);
+    openMedia(playlist[playlistIndex].stream, playlist[playlistIndex].title, 'video');
   }
 }
 
-/* ── Video player (Plyr) ── */
-let player = null;
+/* ── Core open ── */
+function openMedia(stream, title, kind) {
+  playerKind = kind;
 
-function openVideo(streamUrl, title) {
-  const dlg = document.getElementById('player-dialog');
-  const titleEl = document.getElementById('player-title');
+  // update bar meta
+  const pbTitle = document.getElementById('pb-title');
+  const pbIcon  = document.getElementById('pb-kind-icon');
+  if (pbTitle) pbTitle.textContent = title || '';
+  if (pbIcon)  pbIcon.textContent = kind === 'audio' ? 'audio_file' : 'movie';
+
+  if (kind === 'video') {
+    // build/update playlist context
+    if (!playlist.length) { playlist = buildPlaylist(); }
+    const idx = playlist.findIndex(p => p.stream === stream);
+    playlistIndex = idx >= 0 ? idx : 0;
+    _openVideo(stream, title);
+  } else {
+    _openAudio(stream, title);
+  }
+
+  _barShow();
+}
+
+/* ── Video ── */
+function _openVideo(stream, title) {
+  const dlg   = document.getElementById('player-dialog');
   const video = document.getElementById('main-player');
+  const titleEl = document.getElementById('player-title');
   if (!dlg || !video) return;
+
   if (titleEl) titleEl.textContent = title || '';
-  if (player) { try { player.destroy(); } catch(e) {} player = null; }
-  video.src = streamUrl;
+
+  // Destroy old Plyr before changing src
+  if (plyrPlayer) {
+    try { plyrPlayer.destroy(); } catch(e) {}
+    plyrPlayer = null;
+  }
+
+  // Set src + autoplay attribute BEFORE Plyr init (keeps user gesture chain)
+  video.autoplay = true;
+  video.src = stream;
+
   dlg.showModal();
-  player = new Plyr(video, {
+
+  plyrPlayer = new Plyr(video, {
+    autoplay: true,
     controls: ['play-large','play','progress','current-time','mute','volume','captions','fullscreen'],
     keyboard: { focused: true, global: false },
-    fullscreen: { enabled: true, fallback: true, iosNative: false }
+    fullscreen: { enabled: true, fallback: true, iosNative: false },
   });
-  player.on('ended', () => setTimeout(playNext, 600));
-  player.play().catch(() => {});
+
+  plyrPlayer.on('ready', () => { plyrPlayer.play().catch(() => {}); });
+  plyrPlayer.on('ended', () => setTimeout(playNext, 600));
+  plyrPlayer.on('play',  () => _pbPlayIcon(true));
+  plyrPlayer.on('pause', () => _pbPlayIcon(false));
+  plyrPlayer.on('timeupdate', _updateVideoProgress);
 }
 
-function closePlayer() {
-  const dlg = document.getElementById('player-dialog');
-  if (dlg) dlg.close();
-  if (player) { try { player.pause(); } catch(e) {} }
-}
-
-document.getElementById('player-dialog')?.addEventListener('close', () => {
-  if (player) { try { player.pause(); } catch(e) {} }
-});
-
-/* ── Audio player ── */
-function openAudio(streamUrl, title) {
-  const dlg = document.getElementById('audio-dialog');
-  const titleEl = document.getElementById('audio-title');
+/* ── Audio ── */
+function _openAudio(stream, title) {
   const audio = document.getElementById('audio-player');
-  if (!dlg || !audio) return;
-  if (titleEl) titleEl.textContent = title || '';
-  audio.src = streamUrl;
-  dlg.showModal();
+  if (!audio) return;
+  audio.src = stream;
   audio.play().catch(() => {});
 }
 
-function closeAudio() {
-  const dlg = document.getElementById('audio-dialog');
-  const audio = document.getElementById('audio-player');
-  if (dlg) dlg.close();
-  if (audio) audio.pause();
+/* ── Expand / Minimize ── */
+function playerExpand() {
+  if (playerKind !== 'video') return;
+  const dlg = document.getElementById('player-dialog');
+  if (dlg && !dlg.open) dlg.showModal();
 }
 
-document.getElementById('audio-dialog')?.addEventListener('close', () => {
-  document.getElementById('audio-player')?.pause();
+function playerMinimize() {
+  const dlg = document.getElementById('player-dialog');
+  if (!dlg || !dlg.open) return;
+  _minimizing = true;
+  dlg.close();
+  _minimizing = false;
+  _barShow();
+}
+
+/* ── Toggle play/pause ── */
+function playerToggle() {
+  if (playerKind === 'video' && plyrPlayer) {
+    if (plyrPlayer.paused) plyrPlayer.play(); else plyrPlayer.pause();
+  } else if (playerKind === 'audio') {
+    const a = document.getElementById('audio-player');
+    if (a) { if (a.paused) a.play(); else a.pause(); }
+  }
+}
+
+/* ── Full stop ── */
+function playerClose() {
+  _closing = true;
+
+  if (playerKind === 'video') {
+    const dlg = document.getElementById('player-dialog');
+    if (dlg && dlg.open) dlg.close();
+    if (plyrPlayer) {
+      try { plyrPlayer.pause(); plyrPlayer.destroy(); } catch(e) {}
+      plyrPlayer = null;
+    }
+    const video = document.getElementById('main-player');
+    if (video) { video.autoplay = false; video.src = ''; }
+  } else if (playerKind === 'audio') {
+    const a = document.getElementById('audio-player');
+    if (a) { a.pause(); a.src = ''; }
+  }
+
+  _closing = false;
+  playerKind = null;
+  playlist = []; playlistIndex = -1;
+  _barHide();
+}
+
+/* legacy aliases */
+function closePlayer() { playerClose(); }
+function closeAudio()  { playerClose(); }
+function openVideo(stream, title) { openMedia(stream, title, 'video'); }
+function openAudio(stream, title) { openMedia(stream, title, 'audio'); }
+
+/* ── Dialog events ── */
+document.getElementById('player-dialog')?.addEventListener('cancel', (e) => {
+  // Escape key → minimize instead of close
+  e.preventDefault();
+  playerMinimize();
 });
 
-/* ── Log dialog ── */
+document.getElementById('player-dialog')?.addEventListener('close', () => {
+  if (_closing || _minimizing) return;
+  // Backdrop click or other implicit close → treat as minimize
+  _barShow();
+});
+
+/* ── Bottom bar show/hide ── */
+function _barShow() {
+  const bar = document.getElementById('player-bar');
+  if (bar) bar.classList.add('visible');
+  document.body.classList.add('has-player');
+
+  const expandBtn = document.getElementById('pb-expand-btn');
+  if (expandBtn) expandBtn.style.display = playerKind === 'video' ? '' : 'none';
+}
+
+function _barHide() {
+  const bar = document.getElementById('player-bar');
+  if (bar) bar.classList.remove('visible');
+  document.body.classList.remove('has-player');
+  _resetProgress();
+}
+
+/* ── Progress bar ── */
+function _pbPlayIcon(playing) {
+  const icon = document.getElementById('pb-play-icon');
+  if (icon) icon.textContent = playing ? 'pause' : 'play_arrow';
+}
+
+function _fmtTime(s) {
+  if (!isFinite(s) || s < 0) return '0:00';
+  const m = Math.floor(s / 60);
+  return m + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+}
+
+function _setProgress(cur, dur) {
+  const fill  = document.getElementById('pb-fill');
+  const curEl = document.getElementById('pb-current');
+  const durEl = document.getElementById('pb-duration');
+  const pct   = dur > 0 ? Math.min(100, (cur / dur) * 100) : 0;
+  if (fill)  fill.style.width = pct + '%';
+  if (curEl) curEl.textContent = _fmtTime(cur);
+  if (durEl) durEl.textContent = _fmtTime(dur);
+}
+
+function _resetProgress() {
+  _setProgress(0, 0);
+  _pbPlayIcon(false);
+}
+
+function _updateVideoProgress() {
+  if (!plyrPlayer) return;
+  _setProgress(plyrPlayer.currentTime, plyrPlayer.duration);
+}
+
+/* Seek on click / drag */
+function playerSeek(evt) {
+  const track = document.getElementById('pb-track');
+  if (!track) return;
+  const rect = track.getBoundingClientRect();
+  const pct  = Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width));
+  if (playerKind === 'video' && plyrPlayer && plyrPlayer.duration) {
+    plyrPlayer.currentTime = plyrPlayer.duration * pct;
+  } else if (playerKind === 'audio') {
+    const a = document.getElementById('audio-player');
+    if (a && a.duration) a.currentTime = a.duration * pct;
+  }
+}
+
+/* Also support drag-to-seek on progress bar */
+(function() {
+  const track = document.getElementById('pb-track');
+  if (!track) return;
+  let dragging = false;
+  track.addEventListener('mousedown', () => { dragging = true; });
+  document.addEventListener('mousemove', (e) => { if (dragging) playerSeek(e); });
+  document.addEventListener('mouseup',   () => { dragging = false; });
+  track.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    playerSeek(t);
+  }, { passive: false });
+})();
+
+/* ── Audio element: persistent event listeners ── */
+(function initAudio() {
+  const a = document.getElementById('audio-player');
+  if (!a) return;
+  a.addEventListener('timeupdate', () => {
+    if (playerKind === 'audio') _setProgress(a.currentTime, a.duration);
+  });
+  a.addEventListener('durationchange', () => {
+    if (playerKind === 'audio') _setProgress(a.currentTime, a.duration);
+  });
+  a.addEventListener('play',  () => { if (playerKind === 'audio') _pbPlayIcon(true);  });
+  a.addEventListener('pause', () => { if (playerKind === 'audio') _pbPlayIcon(false); });
+  a.addEventListener('ended', () => { if (playerKind === 'audio') _pbPlayIcon(false); });
+})();
+
+/* ════════════════════════════════════════════════════
+   LOG DIALOG
+   ════════════════════════════════════════════════════ */
 function openLog(jobId, title) {
-  const dlg = document.getElementById('log-dialog');
+  const dlg     = document.getElementById('log-dialog');
   const titleEl = document.getElementById('log-title');
   const content = document.getElementById('log-content');
   if (!dlg) return;
@@ -256,6 +437,13 @@ function openLog(jobId, title) {
     .then(t => { if (content) content.textContent = t || '(пусто)'; })
     .catch(e => { if (content) content.textContent = 'Ошибка: ' + e; });
 }
+
+/* ── Dialogs: close on backdrop click ── */
+document.addEventListener('click', (e) => {
+  if (e.target.tagName === 'DIALOG' && e.target.id !== 'player-dialog') {
+    e.target.close();
+  }
+});
 
 /* ── Copy helpers ── */
 function copyLink(itemId) {
@@ -278,7 +466,7 @@ function renameFile(itemId, currentName) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: newName })
   }).then(r => {
-    if (r.ok) { showToast('Переименовано'); const mi=document.getElementById('media-inner'); if(mi) htmx.trigger(mi,'mediaRefresh'); }
+    if (r.ok) { showToast('Переименовано'); const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); }
     else r.text().then(t => showToast('Ошибка: ' + t));
   });
 }
@@ -287,7 +475,7 @@ function renameFile(itemId, currentName) {
 function deleteFile(itemId) {
   fetch(base() + 'items/' + itemId, { method: 'DELETE' })
     .then(r => {
-      if (r.ok) { showToast('Файл удалён'); const mi=document.getElementById('media-inner'); if(mi) htmx.trigger(mi,'mediaRefresh'); }
+      if (r.ok) { showToast('Файл удалён'); const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); }
       else r.text().then(t => showToast('Ошибка: ' + t));
     });
 }
@@ -301,7 +489,7 @@ function addTag(jobId) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name })
   }).then(r => {
-    if (r.ok) { const mi=document.getElementById('media-inner'); if(mi) htmx.trigger(mi,'mediaRefresh'); }
+    if (r.ok) { const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); }
     else r.text().then(t => showToast('Ошибка: ' + t));
   });
 }
@@ -316,7 +504,7 @@ function onRowSelect(cb) {
 }
 
 function updateActionBar() {
-  const bar = document.getElementById('action-bar');
+  const bar   = document.getElementById('action-bar');
   const count = document.getElementById('select-count');
   if (!bar) return;
   const n = selectedJobs.size;
@@ -338,7 +526,7 @@ function bulkTag() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tag: name, job_ids: [...selectedJobs] })
   }).then(r => {
-    if (r.ok) { clearSelection(); const mi=document.getElementById('media-inner'); if(mi) htmx.trigger(mi,'mediaRefresh'); }
+    if (r.ok) { clearSelection(); const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); }
     else r.text().then(t => showToast('Ошибка: ' + t));
   });
 }
@@ -350,7 +538,7 @@ function bulkHide() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ job_ids: [...selectedJobs] })
   }).then(r => {
-    if (r.ok) { clearSelection(); const mi=document.getElementById('media-inner'); if(mi) htmx.trigger(mi,'mediaRefresh'); }
+    if (r.ok) { clearSelection(); const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); }
     else r.text().then(t => showToast('Ошибка: ' + t));
   });
 }
@@ -399,7 +587,7 @@ function addToCollection(collId) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ job_ids: [...selectedJobs] })
   }).then(r => {
-    if (r.ok) { clearSelection(); const mi=document.getElementById('media-inner'); if(mi) htmx.trigger(mi,'mediaRefresh'); showToast('Добавлено в коллекцию'); }
+    if (r.ok) { clearSelection(); const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); showToast('Добавлено в коллекцию'); }
     else r.text().then(t => showToast('Ошибка: ' + t));
   });
 }
@@ -418,7 +606,7 @@ async function createAndAddToCollection() {
   addToCollection(col.ID);
 }
 
-/* ── Status filter (legacy compat + status chip clicks) ── */
+/* ── Status filter ── */
 function activateStatusFilter(status) {
   filter.tag = status;
   filter.kind = '';
@@ -427,13 +615,8 @@ function activateStatusFilter(status) {
   applyFilter();
 }
 
-/* ── Dialogs: close on backdrop click ── */
-document.addEventListener('click', (e) => { if (e.target.tagName === 'DIALOG') e.target.close(); });
-
-/* ── Collection management (sidebar refresh after create/delete) ── */
+/* ── Collection sidebar refresh ── */
 document.body.addEventListener('collectionsRefresh', () => {
-  // Reload sidebar by refreshing the page shell (simplest approach)
-  // In future, could fetch /library/sidebar fragment
   const sidebar = document.getElementById('sidebar');
   if (sidebar) htmx.ajax('GET', 'library/sidebar', { target: '#sidebar', swap: 'outerHTML' });
 });

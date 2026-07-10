@@ -164,27 +164,50 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 			</div>
 		</div>
 
-		<!-- ── Dialogs ── -->
+		<!-- ── Диалог видеоплеера ── -->
 		<dialog id="player-dialog">
 			<div class="dialog-header video-dialog-header">
 				<span class="dialog-title" id="player-title"></span>
-				<button class="icon-btn player-close" onclick="closePlayer()"><span class="mi">close</span></button>
+				<button class="icon-btn" onclick="playerMinimize()" title="Свернуть">
+					<span class="mi">close_fullscreen</span>
+				</button>
+				<button class="icon-btn" onclick="playerClose()" title="Закрыть">
+					<span class="mi">close</span>
+				</button>
 			</div>
 			<div id="player-wrap">
-				<video id="main-player" controls playsinline style="width:100%;display:block"></video>
+				<video id="main-player" playsinline style="width:100%;display:block"></video>
 			</div>
 		</dialog>
 
-		<dialog id="audio-dialog">
-			<div class="dialog-header">
-				<span class="dialog-title">Аудио</span>
-				<button class="icon-btn" onclick="closeAudio()"><span class="mi">close</span></button>
+		<!-- ── Аудио элемент (скрытый, управляется player bar) ── -->
+		<audio id="audio-player" preload="auto" style="display:none"></audio>
+
+		<!-- ── Player bar ── -->
+		<div id="player-bar" class="player-bar">
+			<div class="pb-info">
+				<span class="mi pb-kind-icon" id="pb-kind-icon">play_circle</span>
+				<span class="pb-title" id="pb-title"></span>
 			</div>
-			<div class="audio-body">
-				<div class="audio-title" id="audio-title"></div>
-				<audio id="audio-player" controls style="width:100%"></audio>
+			<div class="pb-center">
+				<span class="pb-time" id="pb-current">0:00</span>
+				<div class="pb-track" id="pb-track" onclick="playerSeek(event)">
+					<div class="pb-fill" id="pb-fill"></div>
+				</div>
+				<span class="pb-time" id="pb-duration">0:00</span>
 			</div>
-		</dialog>
+			<div class="pb-controls">
+				<button class="icon-btn" id="pb-expand-btn" onclick="playerExpand()" title="Развернуть" style="display:none">
+					<span class="mi">open_in_full</span>
+				</button>
+				<button class="icon-btn pb-play-btn" id="pb-play-btn" onclick="playerToggle()" title="Пауза/Воспроизведение">
+					<span class="mi" id="pb-play-icon">pause</span>
+				</button>
+				<button class="icon-btn" onclick="playerClose()" title="Остановить">
+					<span class="mi">close</span>
+				</button>
+			</div>
+		</div>
 
 		<dialog id="log-dialog">
 			<div class="dialog-header">
