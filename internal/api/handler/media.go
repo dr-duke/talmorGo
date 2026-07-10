@@ -33,14 +33,14 @@ type MediaHandler struct {
 	Expander    *playlist.Expander
 }
 
-// Library — главный экран: сетка коллекций.
-func (h *MediaHandler) Library(w http.ResponseWriter, r *http.Request) {
+// LibrarySidebar отдаёт HTML-фрагмент сайдбара с коллекциями (для обновления после изменения коллекций).
+func (h *MediaHandler) LibrarySidebar(w http.ResponseWriter, r *http.Request) {
 	cols, err := h.Collections.List(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	templ.Handler(templates.LibraryPage(cols)).ServeHTTP(w, r)
+	templ.Handler(templates.SidebarNav(cols)).ServeHTTP(w, r)
 }
 
 // LibraryItems — фрагмент списка элементов (HTMX, поддерживает фильтрацию).
@@ -103,10 +103,16 @@ func (h *MediaHandler) BulkHide(w http.ResponseWriter, r *http.Request) {
 }
 
 func parseMediaFilter(r *http.Request) model.MediaFilter {
+	var tags []string
+	for _, t := range r.URL.Query()["tag"] {
+		if t != "" {
+			tags = append(tags, t)
+		}
+	}
 	return model.MediaFilter{
 		Query: r.URL.Query().Get("q"),
 		Kind:  r.URL.Query().Get("kind"),
-		Tags:  r.URL.Query()["tag"],
+		Tags:  tags,
 	}
 }
 

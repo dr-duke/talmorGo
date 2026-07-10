@@ -163,12 +163,12 @@ func seedFailed(t *testing.T, env *testEnv) string {
 // Common actions
 // ─────────────────────────────────────────────────────────────────────────────
 
-// openMedia загружает страницу и ждёт инициализации HTMX.
+// openMedia загружает страницу и ждёт пока HTMX-запрос load завершится.
+// #media-loading — placeholder в статическом HTML; исчезает после outerHTML-swap.
 func openMedia(baseURL string) chromedp.Tasks {
 	return chromedp.Tasks{
 		chromedp.Navigate(baseURL + "/"),
-		chromedp.WaitVisible(`#content`, chromedp.ByID),
-		chromedp.Sleep(800 * time.Millisecond),
+		chromedp.WaitNotPresent(`#media-loading`, chromedp.ByID),
 	}
 }
 
@@ -226,7 +226,7 @@ func TestEmptyState(t *testing.T) {
 	var visible bool
 	err := chromedp.Run(ctx,
 		openMedia(env.URL),
-		chromedp.Evaluate(`document.querySelector('.m3-empty') !== null`, &visible),
+		chromedp.Evaluate(`document.querySelector('.empty-state') !== null`, &visible),
 	)
 	if err != nil {
 		t.Fatalf("check empty state: %v", err)
@@ -282,14 +282,13 @@ func TestAddFormUpdatesMediaList(t *testing.T) {
 		t.Fatalf("add url: %v", err)
 	}
 
-	var count int
-	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.querySelectorAll('.media-row').length`, &count),
-	)
-	if err != nil {
+	var rowCount int
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`document.querySelectorAll('.media-row').length`, &rowCount),
+	); err != nil {
 		t.Fatalf("count rows: %v", err)
 	}
-	if count == 0 {
+	if rowCount == 0 {
 		t.Error("no media rows after adding URL — HX-Trigger mediaRefresh may be broken")
 	}
 }
@@ -339,12 +338,8 @@ func TestRetryFailedJobChangesStatus(t *testing.T) {
 	ctx, cancel := newTab(t)
 	defer cancel()
 
-	// failed — архивный статус, скрыт с главной: ждём появления в DOM и раскрываем фильтром.
-	var revealed bool
 	err := chromedp.Run(ctx,
 		openMedia(env.URL),
-		chromedp.WaitReady(`.status-failed`, chromedp.ByQuery),
-		chromedp.Evaluate(`activateStatusFilter('failed'); true`, &revealed),
 		chromedp.WaitVisible(`.status-failed`, chromedp.ByQuery),
 		chromedp.Click(`[title="Повторить"]`, chromedp.ByQuery),
 		waitForSwap(),
@@ -525,7 +520,7 @@ func TestClickRowOpensPlayer(t *testing.T) {
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
 		// Кликаем по заголовку (некликабельная зона строки), а не по .media-info,
 		// чей центр может попасть на чип-кнопку.
-		chromedp.Click(`.status-done .media-title`, chromedp.ByQuery),
+		chromedp.Click(`.status-done .row-title`, chromedp.ByQuery),
 		chromedp.Sleep(300*time.Millisecond),
 	)
 	if err != nil {
@@ -558,8 +553,14 @@ func TestSearchFilterHidesRows(t *testing.T) {
 	err := chromedp.Run(bCtx,
 		openMedia(env.URL),
 		chromedp.WaitVisible(`.media-row`, chromedp.ByQuery),
-		chromedp.SendKeys(`#media-search`, "Alpha"),
-		chromedp.Sleep(200*time.Millisecond),
+		// Устанавливаем значение поиска за одну операцию и диспатчим один oninput,
+		// чтобы не было гонки от 5 параллельных HTMX-запросов при SendKeys.
+		chromedp.Evaluate(`
+			var inp = document.querySelector('#media-search');
+			inp.value = 'Alpha';
+			inp.dispatchEvent(new Event('input', {bubbles:true}));
+		`, nil),
+		waitForSwap(),
 	)
 	if err != nil {
 		t.Fatalf("search: %v", err)
@@ -592,7 +593,7 @@ func TestPlayerCloses(t *testing.T) {
 	err := chromedp.Run(ctx,
 		openMedia(env.URL),
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
-		chromedp.Click(`.status-done .media-title`, chromedp.ByQuery),
+		chromedp.Click(`.status-done .row-title`, chromedp.ByQuery),
 		chromedp.Sleep(300*time.Millisecond),
 		chromedp.Click(`.player-close`, chromedp.ByQuery),
 		chromedp.Sleep(200*time.Millisecond),
@@ -642,12 +643,6 @@ func TestDeletedFileAllowsRedownload(t *testing.T) {
 		t.Fatal("redownload button not found on .status-deleted row")
 	}
 
-	// deleted — архивный статус, скрыт с главной: раскрываем фильтром перед кликом.
-	var revealed bool
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`activateStatusFilter('deleted'); true`, &revealed)); err != nil {
-		t.Fatalf("reveal deleted: %v", err)
-	}
-
 	// Шаг 2: нажать «Скачать повторно» — должен перейти в pending
 	err = chromedp.Run(ctx,
 		autoConfirm,
@@ -689,7 +684,7 @@ func TestAddTagAppearsInRow(t *testing.T) {
 
 	var tagVisible bool
 	if err := chromedp.Run(ctx, chromedp.Evaluate(
-		`Array.from(document.querySelectorAll('.m3-chip-sm')).some(el => el.textContent.includes('e2eTag'))`,
+		`Array.from(document.querySelectorAll('.tag-chip')).some(el => el.textContent.includes('e2eTag'))`,
 		&tagVisible,
 	)); err != nil || !tagVisible {
 		t.Error("added tag 'e2eTag' not visible in media row after HTMX swap")
@@ -716,7 +711,7 @@ func TestRemoveTagUpdatesRow(t *testing.T) {
 
 	err = chromedp.Run(ctx,
 		openMedia(env.URL),
-		chromedp.WaitVisible(`.m3-chip-sm`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.tag-chip`, chromedp.ByQuery),
 		chromedp.Click(`.chip-remove`, chromedp.ByQuery),
 		waitForSwap(),
 	)
@@ -727,7 +722,7 @@ func TestRemoveTagUpdatesRow(t *testing.T) {
 	// Считаем только пользовательские теги; статус-чип (.m3-chip-status) не считается.
 	var chipCount int
 	if err := chromedp.Run(ctx, chromedp.Evaluate(
-		`document.querySelectorAll('.m3-chip-sm:not(.m3-chip-status)').length`, &chipCount,
+		`document.querySelectorAll('.tag-chip:has(.chip-remove)').length`, &chipCount,
 	)); err != nil || chipCount != 0 {
 		t.Errorf("expected no user tag chips after remove, got %d", chipCount)
 	}
@@ -756,7 +751,7 @@ func TestRenameFileUpdatesTitle(t *testing.T) {
 	}
 
 	var titleText string
-	if err := chromedp.Run(ctx, chromedp.InnerHTML(`.media-title`, &titleText, chromedp.ByQuery)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.InnerHTML(`.row-title`, &titleText, chromedp.ByQuery)); err != nil {
 		t.Fatalf("get title: %v", err)
 	}
 	if !strings.Contains(titleText, "Renamed Video.mp4") {
@@ -836,12 +831,6 @@ func TestCancelledJobAllowsRedownload(t *testing.T) {
 		&hasRedownload,
 	)); err != nil || !hasRedownload {
 		t.Fatal("redownload button not found on .status-cancelled row")
-	}
-
-	// cancelled — архивный статус, скрыт с главной: раскрываем фильтром перед кликом.
-	var revealed bool
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`activateStatusFilter('cancelled'); true`, &revealed)); err != nil {
-		t.Fatalf("reveal cancelled: %v", err)
 	}
 
 	// Нажимаем — должен перейти в pending

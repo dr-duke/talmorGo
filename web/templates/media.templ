@@ -7,113 +7,7 @@ import (
 	"github.com/dr-duke/talmorGo/internal/model"
 )
 
-// LibraryPage — главный экран с сайдбаром: навигация + коллекции + список.
-templ LibraryPage(cols []*model.Collection) {
-	<div class="library-layout">
-		<!-- ── Боковая панель ── -->
-		<aside class="sidebar">
-			<!-- Форма добавления URL -->
-			<form class="add-form" hx-post="queue" hx-swap="none" hx-on::after-request="if(event.detail.successful)this.reset()">
-				<input
-					type="url"
-					name="url"
-					placeholder="Вставьте ссылку…"
-					autocomplete="off"
-					required
-				/>
-				<button type="submit" class="m3-btn m3-btn-filled">
-					<span class="m3-icon">download</span>
-					Скачать
-				</button>
-			</form>
-
-			<!-- Kind-навигация -->
-			<nav class="sidebar-kind-nav">
-				<button class="sidebar-nav-item active" data-kind="" onclick="setKindFilter(this,'')">
-					<span class="m3-icon" style="font-size:18px">list</span>Все
-				</button>
-				<button class="sidebar-nav-item" data-kind="video" onclick="setKindFilter(this,'video')">
-					<span class="m3-icon" style="font-size:18px">videocam</span>Видео
-				</button>
-				<button class="sidebar-nav-item" data-kind="audio" onclick="setKindFilter(this,'audio')">
-					<span class="m3-icon" style="font-size:18px">audio_file</span>Аудио
-				</button>
-			</nav>
-
-			<!-- Коллекции -->
-			if len(cols) > 0 {
-				<div class="sidebar-section">
-					<span class="sidebar-section-label">Коллекции</span>
-					for _, c := range cols {
-						<button
-							class="sidebar-coll-item"
-							data-collection-name={ c.Name }
-							onclick="switchToCollectionTag(this.dataset.collectionName)"
-							title={ c.Name }
-						>
-							<span class="m3-icon" style="font-size:16px">folder</span>
-							<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{ c.Name }</span>
-							if c.ItemCount > 0 {
-								<span class="sidebar-count">{ strconv.Itoa(c.ItemCount) }</span>
-							}
-						</button>
-					}
-				</div>
-			}
-		</aside>
-
-		<!-- ── Основная зона ── -->
-		<div class="library-main">
-			<!-- Скрытая форма для HTMX-фильтров -->
-			<form id="filter-form" style="display:none">
-				<input id="filter-q" name="q" type="hidden"/>
-				<input id="filter-kind" name="kind" type="hidden"/>
-			</form>
-
-			<!-- Фильтр-бар: поиск + теги -->
-			<div class="filter-bar">
-				<input
-					type="search"
-					id="media-search"
-					class="m3-search"
-					placeholder="Поиск по названию, URL, домену…"
-					oninput="onSearchInput(this)"
-				/>
-				<div class="tag-filter-row">
-					<div id="status-chips"></div>
-					@TagCloud(nil)
-				</div>
-			</div>
-
-			<!-- Play-all бар (показывается при выборе коллекции) -->
-			<div id="play-all-bar" class="play-all-bar" style="display:none">
-				<span class="m3-icon" style="color:var(--m3-primary)">folder</span>
-				<span class="play-all-title"></span>
-				<button class="m3-btn m3-btn-sm m3-btn-filled" onclick="playAll()">
-					<span class="m3-icon">play_arrow</span>Воспроизвести всё
-				</button>
-			</div>
-
-			<!-- Список элементов (lazy load) -->
-			<div
-				id="media-inner"
-				hx-get="library/items"
-				hx-trigger="load, mediaRefresh from:body"
-				hx-swap="outerHTML"
-				hx-include="#filter-form"
-			>
-				<div class="m3-empty">
-					<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">hourglass_empty</span>
-					<p>Загрузка…</p>
-				</div>
-			</div>
-		</div>
-	</div>
-
-	@ActionBar()
-}
-
-// ItemList — HTMX-фрагмент: список медиаэлементов с пагинацией и фильтрацией.
+// ItemList — HTMX-фрагмент: список медиаэлементов.
 templ ItemList(items []*model.MediaItem, tagCounts []*model.TagWithCount, f model.MediaFilter) {
 	<div
 		id="media-inner"
@@ -123,8 +17,8 @@ templ ItemList(items []*model.MediaItem, tagCounts []*model.TagWithCount, f mode
 		hx-include="#filter-form"
 	>
 		if len(items) == 0 {
-			<div class="m3-empty">
-				<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">video_library</span>
+			<div class="empty-state">
+				<span class="mi">video_library</span>
 				<p>Медиатека пуста</p>
 			</div>
 		} else {
@@ -137,42 +31,31 @@ templ ItemList(items []*model.MediaItem, tagCounts []*model.TagWithCount, f mode
 	</div>
 }
 
-// MediaTab — легаси-вкладка (используется для совместимости).
-templ MediaTab(items []*model.MediaItem, tagCounts []*model.TagWithCount) {
-	<div id="tab-video" class="tab-panel">
-		@LibraryPage(nil)
-	</div>
-	<div id="tab-collections" class="tab-panel" style="display:none">
-		<div id="collections-inner" hx-get="collections/cards" hx-trigger="collectionsRefresh from:body" hx-swap="outerHTML">
-			<div class="m3-empty">
-				<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">hourglass_empty</span>
-				<p>Загрузка…</p>
-			</div>
-		</div>
-	</div>
-	@ActionBar()
-}
-
 templ TagCloud(tagCounts []*model.TagWithCount) {
-	<div id="tag-cloud" hx-get="library/tags" hx-trigger="tagsRefresh from:body, load once" hx-swap="outerHTML">
+	<div id="tag-cloud" class="toolbar-chips" hx-get="library/tags" hx-trigger="tagsRefresh from:body, load once" hx-swap="outerHTML">
 		for i, t := range tagCounts {
 			if t.IsCollection {
 				<button
-					class={ "m3-chip", "m3-chip-collection-tag", templ.KV("tag-extra", i >= 5) }
+					class={ "chip", "coll", templ.KV("tag-extra", i >= 5) }
 					data-tag={ t.Name }
-					onclick="toggleUserTag(this)"
+					onclick="toggleTag(this)"
 					title={ "Коллекция: " + t.Name }
-				><span class="m3-icon" style="font-size:14px;vertical-align:middle">folder</span> { t.Name } <span class="chip-count">{ strconv.Itoa(t.Count) }</span></button>
+				>
+					<span class="mi" style="font-size:13px">folder</span>{ t.Name }
+					<span style="opacity:.65">{ strconv.Itoa(t.Count) }</span>
+				</button>
 			} else {
 				<button
-					class={ "m3-chip", templ.KV("tag-extra", i >= 5) }
+					class={ "chip", templ.KV("tag-extra", i >= 5) }
 					data-tag={ t.Name }
-					onclick="toggleUserTag(this)"
-				>{ t.Name } <span class="chip-count">{ strconv.Itoa(t.Count) }</span></button>
+					onclick="toggleTag(this)"
+				>
+					{ t.Name }<span style="opacity:.65">{ strconv.Itoa(t.Count) }</span>
+				</button>
 			}
 		}
 		if len(tagCounts) > 5 {
-			<button class="m3-chip tag-expand-btn" id="tag-expand-btn" onclick="expandTags()">
+			<button class="chip tag-expand-btn" onclick="expandTags()">
 				+{ strconv.Itoa(len(tagCounts) - 5) } ещё
 			</button>
 		}
@@ -182,100 +65,72 @@ templ TagCloud(tagCounts []*model.TagWithCount) {
 templ ActionBar() {
 	<div id="action-bar" class="action-bar hidden">
 		<span id="select-count" class="action-bar-count">0 выбрано</span>
-		<button class="m3-btn m3-btn-sm" onclick="bulkTag()">
-			<span class="m3-icon">label</span>Тег
+		<button class="btn btn-ghost btn-sm" onclick="bulkTag()">
+			<span class="mi">label</span>Тег
 		</button>
 		<div class="coll-dropdown-wrap">
-			<button class="m3-btn m3-btn-sm" onclick="toggleCollectionDropdown()">
-				<span class="m3-icon">folder_open</span>В коллекцию
+			<button class="btn btn-ghost btn-sm" onclick="toggleCollDropdown()">
+				<span class="mi">folder_open</span>В коллекцию
 			</button>
-			<div id="collection-dropdown" class="coll-dropdown hidden"></div>
+			<div id="coll-dropdown" class="coll-dropdown hidden"></div>
 		</div>
-		<button class="m3-btn m3-btn-sm" onclick="bulkHide()">
-			<span class="m3-icon">visibility_off</span>Скрыть
+		<button class="btn btn-ghost btn-sm" onclick="bulkHide()">
+			<span class="mi">visibility_off</span>Скрыть
 		</button>
-		<button class="m3-icon-btn" onclick="clearSelection()" title="Отменить выбор">
-			<span class="m3-icon">close</span>
+		<button class="icon-btn" onclick="clearSelection()" title="Отменить выбор">
+			<span class="mi">close</span>
 		</button>
-	</div>
-}
-
-templ MediaList(items []*model.MediaItem) {
-	<div
-		id="media-inner"
-		hx-get="library/items"
-		hx-trigger="mediaRefresh from:body"
-		hx-swap="outerHTML"
-		hx-include="#filter-form"
-	>
-		if len(items) == 0 {
-			<div class="m3-empty">
-				<span class="m3-icon" style="font-size:3rem;color:var(--m3-outline)">video_library</span>
-				<p>Медиатека пуста</p>
-			</div>
-		} else {
-			<div class="media-list">
-				for _, item := range items {
-					@mediaRow(item)
-				}
-			</div>
-		}
 	</div>
 }
 
 templ mediaRow(item *model.MediaItem) {
 	<div
-		class={ "media-row", "status-" + item.EffectiveStatus() }
+		class={ "media-row", "sl-" + item.EffectiveStatus(), "status-" + item.EffectiveStatus() }
 		data-job-id={ item.Job.ID }
 		data-title={ item.DisplayTitle() }
 		data-url={ item.Job.URL }
 		data-domain={ item.Job.Domain() }
-		data-tags={ joinTagsWithStatus(item.EffectiveStatus(), item.Tags) }
 		if rowAvailable(item) {
 			data-stream={ fmt.Sprintf("items/%s/stream", item.Item.ID) }
 			data-kind={ item.Item.Kind }
-			if item.Item.IsVideo() {
-				onclick="rowClick(event, this)"
-				style="cursor:pointer"
-			}
 		}
 	>
-		<label class="row-select" onclick="event.stopPropagation()">
+		<label class="row-check" onclick="event.stopPropagation()">
 			<input type="checkbox" class="row-checkbox" value={ item.Job.ID } onchange="onRowSelect(this)"/>
 		</label>
-		<div class="media-main">
-			<div class="media-title">
+		<div class="row-main" onclick={ rowClickExpr(item) }>
+			<div class="row-title">
 				if rowAvailable(item) && item.Item.IsAudio() {
-					<span class="m3-icon" style="font-size:16px;color:var(--m3-primary);flex-shrink:0">audio_file</span>
+					<span class="mi" style="font-size:15px;color:var(--accent);flex-shrink:0">audio_file</span>
 				} else {
 					<img
 						class="favicon"
 						src={ fmt.Sprintf("https://www.google.com/s2/favicons?domain=%s&sz=16", item.Job.Domain()) }
-						width="16"
-						height="16"
+						width="14" height="14"
+						style="border-radius:2px;flex-shrink:0"
 						onerror="this.style.visibility='hidden'"
 						loading="lazy"
 					/>
 				}
-				<span class="title-text">{ item.DisplayTitle() }</span>
+				<span class="row-title-text">{ item.DisplayTitle() }</span>
 			</div>
-			<div class="media-meta">
-				<span class="domain-label">{ shortDomain(item.Job.Domain()) }</span>
-				if rowAvailable(item) {
-					<span class="meta-size">{ formatSize(item.Item.Size) }</span>
+			<div class="row-meta">
+				<span class="row-domain">{ shortDomain(item.Job.Domain()) }</span>
+				if rowAvailable(item) && item.Item.Size > 0 {
+					<span class="row-size">{ formatSize(item.Item.Size) }</span>
 				}
 				if item.Job.Status == model.JobRetrying && item.Job.NextRetryAt != nil {
-					<span class="meta-retry">{ retryIn(item.Job.NextRetryAt) }</span>
+					<span class="row-retry-note">{ retryIn(item.Job.NextRetryAt) }</span>
 				}
-				<span class="tag-chips">
+				<span class="row-tag-chips">
 					<button
-						class={ "m3-chip", "m3-chip-sm", "m3-chip-status", "badge-" + item.EffectiveStatus() }
-						data-tag={ item.EffectiveStatus() }
-						onclick="event.stopPropagation();activateStatusFilter(this.dataset.tag)"
-						title="Фильтр по статусу"
+						class={ "tag-chip", templ.KV("coll", false) }
+						style={ "background:var(--surface-2);color:var(--" + statusColor(item.EffectiveStatus()) + ")" }
+						onclick="event.stopPropagation()"
+						title="Статус"
 					>{ statusLabel(item.EffectiveStatus()) }</button>
 					for _, tag := range item.Tags {
-						<span class="m3-chip m3-chip-sm">
+						<span class="tag-chip">
 							{ tag }
 							<button
 								class="chip-remove"
@@ -287,7 +142,8 @@ templ mediaRow(item *model.MediaItem) {
 						</span>
 					}
 					<button
-						class="m3-chip m3-chip-add"
+						class="tag-chip"
+						style="border-style:dashed;opacity:.7"
 						data-job-id={ item.Job.ID }
 						onclick="event.stopPropagation();addTag(this.dataset.jobId)"
 						title="Добавить тег"
@@ -295,92 +151,90 @@ templ mediaRow(item *model.MediaItem) {
 				</span>
 			</div>
 		</div>
-		<div class="media-actions" onclick="event.stopPropagation()">
+		<div class="row-actions" onclick="event.stopPropagation()">
 			switch rowPrimary(item) {
 				case "cancel":
 					if item.Job.Status == model.JobRetrying {
 						<button
-							class="m3-icon-btn"
+							class="icon-btn"
 							hx-post={ fmt.Sprintf("jobs/%s/retry", item.Job.ID) }
 							hx-swap="none"
 							title="Повторить сейчас"
-						><span class="m3-icon">replay</span></button>
+						><span class="mi">replay</span></button>
 					}
 					<button
-						class="m3-icon-btn m3-icon-btn-danger"
+						class="icon-btn danger"
 						hx-delete={ fmt.Sprintf("queue/%s", item.Job.ID) }
 						hx-swap="none"
 						title="Отменить"
-					><span class="m3-icon">cancel</span></button>
+					><span class="mi">cancel</span></button>
 				case "retry":
 					<button
-						class="m3-icon-btn"
+						class="icon-btn"
 						hx-post={ fmt.Sprintf("jobs/%s/retry", item.Job.ID) }
 						hx-swap="none"
 						title="Повторить"
-					><span class="m3-icon">replay</span></button>
+					><span class="mi">replay</span></button>
 				case "play":
 					if item.Item.IsAudio() {
 						<button
-							class="m3-icon-btn"
+							class="icon-btn"
 							data-stream={ fmt.Sprintf("items/%s/stream", item.Item.ID) }
 							data-title={ item.DisplayTitle() }
-							onclick="openAudioPlayer(this.dataset.stream, this.dataset.title)"
+							onclick="openAudio(this.dataset.stream, this.dataset.title)"
 							title="Слушать"
-						><span class="m3-icon">play_circle</span></button>
+						><span class="mi">play_circle</span></button>
 					} else {
 						<button
-							class="m3-icon-btn"
+							class="icon-btn"
 							data-stream={ fmt.Sprintf("items/%s/stream", item.Item.ID) }
 							data-title={ item.DisplayTitle() }
-							onclick="openPlayer(this.dataset.stream, this.dataset.title)"
+							onclick="rowPlay(event, this.closest('.media-row'))"
 							title="Смотреть"
-						><span class="m3-icon">play_circle</span></button>
+						><span class="mi">play_circle</span></button>
 					}
 				case "redownload":
 					<button
-						class="m3-icon-btn"
+						class="icon-btn"
 						hx-post={ fmt.Sprintf("jobs/%s/redownload", item.Job.ID) }
 						hx-swap="none"
 						title="Скачать повторно"
-					><span class="m3-icon">refresh</span></button>
+					><span class="mi">refresh</span></button>
 			}
 			<div class="row-menu-wrap">
-				<button class="m3-icon-btn" title="Ещё" onclick="toggleRowMenu(event, this)"><span class="m3-icon">more_vert</span></button>
+				<button class="icon-btn" title="Ещё" onclick="toggleMenu(event, this)">
+					<span class="mi">more_vert</span>
+				</button>
 				<div class="row-menu">
 					if rowAvailable(item) {
 						<a
 							class="row-menu-item"
 							href={ templ.SafeURL(fmt.Sprintf("items/%s/stream", item.Item.ID)) }
 							target="_blank"
-							title="Открыть в новой вкладке"
-						><span class="m3-icon">open_in_new</span>Открыть в новой вкладке</a>
+						><span class="mi">open_in_new</span>Открыть в новой вкладке</a>
 						<a
 							class="row-menu-item"
 							href={ templ.SafeURL(fmt.Sprintf("items/%s/stream?download=true", item.Item.ID)) }
-							title="Скачать"
-						><span class="m3-icon">download</span>Скачать</a>
+						><span class="mi">download</span>Скачать файл</a>
 						<button
 							class="row-menu-item"
 							data-item-id={ item.Item.ID }
-							onclick="copyPresigned(this.dataset.itemId, this)"
-							title="Постоянная ссылка"
-						><span class="m3-icon">link</span>Постоянная ссылка</button>
+							onclick="copyLink(this.dataset.itemId)"
+						><span class="mi">link</span>Постоянная ссылка</button>
 						<button
 							class="row-menu-item"
 							data-item-id={ item.Item.ID }
 							data-name={ item.Item.Name }
-							onclick="renamePrompt(this.dataset.itemId, this.dataset.name)"
+							onclick="renameFile(this.dataset.itemId, this.dataset.name)"
 							title="Переименовать"
-						><span class="m3-icon">edit</span>Переименовать</button>
+						><span class="mi">edit</span>Переименовать</button>
 					}
 					if item.Job.Source != "filesystem" {
 						<button
 							class="row-menu-item"
 							data-url={ item.Job.URL }
-							onclick="copyOriginalURL(this.dataset.url)"
-							title="Скопировать исходную ссылку"
-						><span class="m3-icon">content_copy</span>Скопировать ссылку</button>
+							onclick="copyURL(this.dataset.url)"
+						><span class="mi">content_copy</span>Скопировать ссылку</button>
 					}
 					if rowShowLog(item) {
 						<button
@@ -388,8 +242,7 @@ templ mediaRow(item *model.MediaItem) {
 							data-job-id={ item.Job.ID }
 							data-title={ item.DisplayTitle() }
 							onclick="openLog(this.dataset.jobId, this.dataset.title)"
-							title="Лог скачивания"
-						><span class="m3-icon">terminal</span>Лог скачивания</button>
+						><span class="mi">terminal</span>Лог скачивания</button>
 					}
 					if rowRedownloadable(item) && rowPrimary(item) != "redownload" {
 						<button
@@ -397,51 +250,54 @@ templ mediaRow(item *model.MediaItem) {
 							hx-post={ fmt.Sprintf("jobs/%s/redownload", item.Job.ID) }
 							hx-swap="none"
 							title="Скачать повторно"
-						><span class="m3-icon">refresh</span>Скачать повторно</button>
+						><span class="mi">refresh</span>Скачать повторно</button>
 					}
 					if rowAvailable(item) && item.Item.IsVideo() {
 						<button
 							class="row-menu-item"
 							hx-post={ fmt.Sprintf("items/%s/extract-audio", item.Item.ID) }
 							hx-swap="none"
-							title="Извлечь аудиодорожку"
-						><span class="m3-icon">audio_file</span>Извлечь аудио</button>
+						><span class="mi">audio_file</span>Извлечь аудио</button>
 					}
 					if rowAvailable(item) {
 						<div class="row-menu-divider"></div>
 						<button
 							class="row-menu-item danger"
 							data-item-id={ item.Item.ID }
-							data-title={ item.DisplayTitle() }
-							onclick="deleteFile(this.dataset.itemId, this.dataset.title)"
+							onclick="deleteFile(this.dataset.itemId)"
 							title="Удалить файл"
-						><span class="m3-icon">delete</span>Удалить файл</button>
+						><span class="mi">delete</span>Удалить файл</button>
 					}
+					<div class="row-menu-divider"></div>
 					if item.Job.Hidden {
 						<button
 							class="row-menu-item"
 							hx-post={ fmt.Sprintf("jobs/%s/unhide", item.Job.ID) }
 							hx-swap="none"
-							title="Вернуть на главную"
-						><span class="m3-icon">visibility</span>Вернуть на главную</button>
+						><span class="mi">visibility</span>Вернуть на главную</button>
 						<button
 							class="row-menu-item danger"
 							hx-delete={ fmt.Sprintf("jobs/%s", item.Job.ID) }
 							hx-swap="none"
-							title="Удалить навсегда"
-						><span class="m3-icon">delete_forever</span>Удалить навсегда</button>
+						><span class="mi">delete_forever</span>Удалить навсегда</button>
 					} else {
 						<button
 							class="row-menu-item danger"
 							hx-post={ fmt.Sprintf("jobs/%s/hide", item.Job.ID) }
 							hx-swap="none"
-							title="Скрыть"
-						><span class="m3-icon">visibility_off</span>Скрыть</button>
+						><span class="mi">visibility_off</span>Скрыть</button>
 					}
 				</div>
 			</div>
 		</div>
 	</div>
+}
+
+func rowClickExpr(it *model.MediaItem) templ.ComponentScript {
+	if rowAvailable(it) && it.Item.IsVideo() {
+		return templ.ComponentScript{Call: "rowPlay(event, this.closest('.media-row'))"}
+	}
+	return templ.ComponentScript{}
 }
 
 func joinTagsWithStatus(status string, tags []string) string {
@@ -494,8 +350,8 @@ func rowShowLog(it *model.MediaItem) bool {
 }
 
 func shortDomain(d string) string {
-	if len(d) > 18 {
-		return d[:15] + "…"
+	if len(d) > 20 {
+		return d[:17] + "…"
 	}
 	return d
 }
@@ -512,6 +368,8 @@ func statusLabel(s string) string {
 		return "повтор"
 	case "done":
 		return "готово"
+	case "imported":
+		return "импортирован"
 	case "failed":
 		return "ошибка"
 	case "missing":
@@ -522,10 +380,23 @@ func statusLabel(s string) string {
 		return "отменено"
 	case "hidden":
 		return "скрыт"
-	case "imported":
-		return "импортирован"
 	default:
 		return s
+	}
+}
+
+func statusColor(s string) string {
+	switch s {
+	case "checking", "pending", "running", "retrying":
+		return "accent"
+	case "done", "imported":
+		return "ok-fg"
+	case "failed", "deleted", "cancelled":
+		return "danger"
+	case "missing":
+		return "warn-fg"
+	default:
+		return "text-2"
 	}
 }
 
