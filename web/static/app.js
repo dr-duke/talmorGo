@@ -230,10 +230,7 @@ function _openVideo(stream, title) {
     plyrPlayer = null;
   }
 
-  // Set src + autoplay attribute BEFORE Plyr init (keeps user gesture chain)
-  video.autoplay = true;
   video.src = stream;
-
   dlg.showModal();
 
   plyrPlayer = new Plyr(video, {
@@ -243,7 +240,9 @@ function _openVideo(stream, title) {
     fullscreen: { enabled: true, fallback: true, iosNative: false },
   });
 
-  plyrPlayer.on('ready', () => { plyrPlayer.play().catch(() => {}); });
+  // Call play() immediately within user gesture window (not deferred to 'ready' event)
+  plyrPlayer.play().catch(() => {});
+
   plyrPlayer.on('ended', () => setTimeout(playNext, 600));
   plyrPlayer.on('play',  () => _pbPlayIcon(true));
   plyrPlayer.on('pause', () => _pbPlayIcon(false));
@@ -301,7 +300,7 @@ function playerClose() {
       plyrPlayer = null;
     }
     const video = document.getElementById('main-player');
-    if (video) { video.autoplay = false; video.src = ''; }
+    if (video) { video.src = ''; }
   } else if (kind === 'audio') {
     const a = document.getElementById('audio-player');
     if (a) { a.pause(); a.src = ''; }

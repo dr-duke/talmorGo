@@ -335,27 +335,16 @@ templ Layout(title string, basePath string, siteName string) {
 					background: #000;
 					width: min(96vw, 960px);
 					max-height: 92vh;
+					overflow: hidden;
 					box-shadow: 0 8px 48px rgba(0,0,0,.7);
 				}
-				/* display:none for closed dialogs is a browser default;
-				   only override to flex when open — never globally */
-				dialog#player-dialog[open] { display: flex; flex-direction: column; }
 				.video-dialog-header {
 					background: #111; border-color: #2a2a2a;
-					flex-shrink: 0;
 				}
 				.video-dialog-header .icon-btn { color: #aaa; }
 				.video-dialog-header .icon-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
-				#player-wrap {
-					flex: 1; min-height: 0; overflow: hidden; background: #000;
-					display: flex; align-items: center; justify-content: center;
-				}
-				#player-wrap .plyr { width: 100%; }
-				#player-wrap video {
-					display: block; width: 100%;
-					max-height: calc(92vh - 50px);
-					object-fit: contain;
-				}
+				#player-wrap { overflow: hidden; background: #000; }
+				#player-wrap video { display: block; width: 100%; }
 
 				/* ── Log dialog ── */
 				dialog#log-dialog {
