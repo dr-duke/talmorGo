@@ -192,8 +192,31 @@ function playNext() {
   }
 }
 
+/* ── Teardown current player (before switching kind or stopping) ── */
+function _teardown() {
+  if (playerKind === 'video') {
+    const dlg = document.getElementById('player-dialog');
+    if (dlg && dlg.open) {
+      // _minimizing suppresses the close-event handler calling _barShow()
+      // (close fires synchronously inside dlg.close())
+      _minimizing = true;
+      dlg.close();
+      _minimizing = false;
+    }
+    if (plyrPlayer) { try { plyrPlayer.pause(); plyrPlayer.destroy(); } catch(e) {} plyrPlayer = null; }
+    const video = document.getElementById('main-player');
+    if (video) video.src = '';
+  } else if (playerKind === 'audio') {
+    const a = document.getElementById('audio-player');
+    if (a) { a.pause(); a.src = ''; }
+  }
+}
+
 /* ── Core open ── */
 function openMedia(stream, title, kind) {
+  // Stop the other kind before switching (prevents two players running at once)
+  if (playerKind !== null && playerKind !== kind) _teardown();
+
   playerKind = kind;
 
   // update bar meta
@@ -231,7 +254,8 @@ function _openVideo(stream, title) {
   }
 
   video.src = stream;
-  dlg.showModal();
+  // showModal() throws if dialog is already open (e.g. clicking another video while one plays)
+  if (!dlg.open) dlg.showModal();
 
   plyrPlayer = new Plyr(video, {
     autoplay: true,
