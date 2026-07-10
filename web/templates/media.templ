@@ -102,6 +102,8 @@ templ mediaRow(item *model.MediaItem) {
 			<div class="row-title">
 				if rowAvailable(item) && item.Item.IsAudio() {
 					<span class="mi" style="font-size:15px;color:var(--accent);flex-shrink:0">audio_file</span>
+				} else if item.Job.Source == "filesystem" {
+					<span class="mi" style="font-size:15px;opacity:.5;flex-shrink:0">folder</span>
 				} else {
 					<img
 						class="favicon"
@@ -115,7 +117,9 @@ templ mediaRow(item *model.MediaItem) {
 				<span class="row-title-text">{ item.DisplayTitle() }</span>
 			</div>
 			<div class="row-meta">
-				<span class="row-domain">{ shortDomain(item.Job.Domain()) }</span>
+				if item.Job.Source != "filesystem" {
+					<span class="row-domain">{ shortDomain(item.Job.Domain()) }</span>
+				}
 				if rowAvailable(item) && item.Item.Size > 0 {
 					<span class="row-size">{ formatSize(item.Item.Size) }</span>
 				}

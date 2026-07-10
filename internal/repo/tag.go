@@ -72,10 +72,11 @@ func (r *sqliteTagRepo) RemoveFromJob(ctx context.Context, jobID, tagName string
 
 func (r *sqliteTagRepo) ListWithCount(ctx context.Context) ([]*model.TagWithCount, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT t.name, COUNT(jt.job_id) AS cnt,
+		SELECT t.name, COUNT(j.id) AS cnt,
 		       CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END AS is_coll
 		FROM tags t
 		LEFT JOIN job_tags jt ON jt.tag_id = t.id
+		LEFT JOIN jobs j ON j.id = jt.job_id AND j.hidden = 0
 		LEFT JOIN collections c ON c.name = t.name
 		GROUP BY t.id
 		HAVING cnt > 0 OR t.kind = 'collection'

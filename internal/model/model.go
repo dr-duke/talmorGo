@@ -2,8 +2,32 @@ package model
 
 import (
 	"net/url"
+	"regexp"
+	"strings"
 	"time"
 )
+
+// ytdlpID matches yt-dlp video IDs in filenames, e.g. " [CRbLJq6Pgew]" before the extension.
+var ytdlpID = regexp.MustCompile(`\s*\[[A-Za-z0-9_-]{6,15}\](\.[^.]+)$`)
+
+// ytdlpFmt matches yt-dlp format codes in filenames, e.g. ".f140" before the extension.
+var ytdlpFmt = regexp.MustCompile(`\.f\d{3,4}(\.[^.]+)$`)
+
+// cleanFileName strips yt-dlp artifacts (video IDs, format codes) from file names.
+func cleanFileName(name string) string {
+	strip := func(s string, m []int) string {
+		ext := s[m[2]:]
+		base := strings.TrimRight(s[:m[0]], " \t")
+		return base + ext
+	}
+	if m := ytdlpID.FindStringSubmatchIndex(name); m != nil {
+		name = strip(name, m)
+	}
+	if m := ytdlpFmt.FindStringSubmatchIndex(name); m != nil {
+		name = strip(name, m)
+	}
+	return strings.TrimSpace(name)
+}
 
 type JobStatus string
 
@@ -104,7 +128,7 @@ func (m *MediaItem) EffectiveStatus() string {
 // DisplayTitle возвращает имя файла или заголовок задания.
 func (m *MediaItem) DisplayTitle() string {
 	if m.Item != nil && m.Item.IsAvailable() {
-		return m.Item.Name
+		return cleanFileName(m.Item.Name)
 	}
 	if m.Job.Title != "" {
 		return m.Job.Title
