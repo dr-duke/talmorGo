@@ -180,23 +180,11 @@ templ mediaRow(item *model.MediaItem) {
 						title="Повторить"
 					><span class="mi">replay</span></button>
 				case "play":
-					if item.Item.IsAudio() {
-						<button
-							class="icon-btn"
-							data-stream={ fmt.Sprintf("items/%s/stream", item.Item.ID) }
-							data-title={ item.DisplayTitle() }
-							onclick="openAudio(this.dataset.stream, this.dataset.title)"
-							title="Слушать"
-						><span class="mi">play_circle</span></button>
-					} else {
-						<button
-							class="icon-btn"
-							data-stream={ fmt.Sprintf("items/%s/stream", item.Item.ID) }
-							data-title={ item.DisplayTitle() }
-							onclick="rowPlay(event, this.closest('.media-row'))"
-							title="Смотреть"
-						><span class="mi">play_circle</span></button>
-					}
+					<button
+						class="icon-btn"
+						onclick="rowActivate(event, this.closest('.media-row'))"
+						title={ map[bool]string{true:"Слушать",false:"Смотреть"}[item.Item.IsAudio()] }
+					><span class="mi">play_circle</span></button>
 				case "redownload":
 					<button
 						class="icon-btn"
@@ -298,8 +286,8 @@ templ mediaRow(item *model.MediaItem) {
 }
 
 func rowClickExpr(it *model.MediaItem) templ.ComponentScript {
-	if rowAvailable(it) && it.Item.IsVideo() {
-		return templ.ComponentScript{Call: "rowPlay(event, this.closest('.media-row'))"}
+	if rowAvailable(it) {
+		return templ.ComponentScript{Call: "rowActivate(event, this.closest('.media-row'))"}
 	}
 	return templ.ComponentScript{}
 }

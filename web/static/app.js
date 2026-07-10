@@ -158,6 +158,16 @@ function buildPlaylist() {
     .map(row => ({ stream: row.dataset.stream, title: row.dataset.title }));
 }
 
+function rowActivate(evt, row) {
+  if (evt) evt.stopPropagation();
+  if (!row || !row.dataset.stream) return;
+  if (row.dataset.kind === 'audio') {
+    openAudio(row.dataset.stream, row.dataset.title);
+  } else {
+    rowPlay(evt, row);
+  }
+}
+
 function rowPlay(evt, row) {
   if (evt) evt.stopPropagation();
   if (!row || !row.dataset.stream) return;
