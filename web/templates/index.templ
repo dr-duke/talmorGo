@@ -212,6 +212,49 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 			<pre id="log-content">Загрузка…</pre>
 		</dialog>
 
+		<!-- ── Диалог редактирования аудио-тегов ── -->
+		<dialog id="meta-dialog">
+			<div class="dialog-header">
+				<span class="dialog-title" id="meta-dialog-title">Теги аудио</span>
+				<button class="icon-btn" onclick="document.getElementById('meta-dialog').close()"><span class="mi">close</span></button>
+			</div>
+			<div class="meta-dialog-body">
+				<table class="meta-matrix">
+					<tbody>
+						<tr class="meta-row" data-field="title">
+							<td><input type="checkbox" class="meta-check" onchange="metaCheckChange(this)"/></td>
+							<td class="meta-label">Название</td>
+							<td><input type="text" class="meta-input" id="meta-title" placeholder="Название трека"/></td>
+						</tr>
+						<tr class="meta-row" data-field="artist">
+							<td><input type="checkbox" class="meta-check" onchange="metaCheckChange(this)"/></td>
+							<td class="meta-label">Исполнитель</td>
+							<td><input type="text" class="meta-input" id="meta-artist" placeholder="Исполнитель"/></td>
+						</tr>
+						<tr class="meta-row" data-field="album">
+							<td><input type="checkbox" class="meta-check" onchange="metaCheckChange(this)"/></td>
+							<td class="meta-label">Альбом</td>
+							<td><input type="text" class="meta-input" id="meta-album" placeholder="Альбом"/></td>
+						</tr>
+						<tr class="meta-row" data-field="year">
+							<td><input type="checkbox" class="meta-check" onchange="metaCheckChange(this)"/></td>
+							<td class="meta-label">Год</td>
+							<td><input type="text" class="meta-input" id="meta-year" placeholder="2024"/></td>
+						</tr>
+						<tr class="meta-row" data-field="genre">
+							<td><input type="checkbox" class="meta-check" onchange="metaCheckChange(this)"/></td>
+							<td class="meta-label">Жанр</td>
+							<td><input type="text" class="meta-input" id="meta-genre" placeholder="Жанр"/></td>
+						</tr>
+					</tbody>
+				</table>
+				<div class="meta-footer">
+					<span id="meta-count-note" class="meta-count-note"></span>
+					<button class="btn btn-primary btn-sm" onclick="applyMeta()">Применить</button>
+				</div>
+			</div>
+		</dialog>
+
 		@ActionBar()
 
 		<!-- ── SSE: dispatches htmx mediaRefresh ── -->

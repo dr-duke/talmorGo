@@ -536,11 +536,27 @@ function addTag(jobId) {
 }
 
 /* ── Bulk selection ── */
-const selectedJobs = new Set();
+const selectedJobs  = new Set();
+const selectedItems = new Map(); // job_id -> { itemId, kind, title, artist, album, year, genre }
 
 function onRowSelect(cb) {
-  if (cb.checked) selectedJobs.add(cb.value);
-  else selectedJobs.delete(cb.value);
+  const row   = cb.closest('.media-row');
+  const jobId = cb.value;
+  if (cb.checked) {
+    selectedJobs.add(jobId);
+    selectedItems.set(jobId, {
+      itemId: row.dataset.itemId  || '',
+      kind:   row.dataset.kind    || '',
+      title:  row.dataset.metaTitle  || '',
+      artist: row.dataset.metaArtist || '',
+      album:  row.dataset.metaAlbum  || '',
+      year:   row.dataset.metaYear   || '',
+      genre:  row.dataset.metaGenre  || '',
+    });
+  } else {
+    selectedJobs.delete(jobId);
+    selectedItems.delete(jobId);
+  }
   updateActionBar();
 }
 
@@ -551,12 +567,100 @@ function updateActionBar() {
   const n = selectedJobs.size;
   if (count) count.textContent = n + ' выбрано';
   bar.classList.toggle('hidden', n === 0);
+  const metaBtn = document.getElementById('action-meta-btn');
+  if (metaBtn) {
+    const allAudio = n > 0 && [...selectedItems.values()].every(e => e.kind === 'audio' && e.itemId);
+    metaBtn.style.display = allAudio ? '' : 'none';
+  }
 }
 
 function clearSelection() {
   selectedJobs.clear();
+  selectedItems.clear();
   document.querySelectorAll('.row-checkbox:checked').forEach(cb => { cb.checked = false; });
   updateActionBar();
+}
+
+/* ── Audio meta dialog ── */
+let _metaTarget = null; // { itemId, title, artist, album, year, genre } для пункта из меню строки
+
+function openMetaFromMenu(row) {
+  if (openMenu) { openMenu.classList.remove('open'); openMenu = null; }
+  _metaTarget = {
+    itemId: row.dataset.itemId   || '',
+    title:  row.dataset.metaTitle  || '',
+    artist: row.dataset.metaArtist || '',
+    album:  row.dataset.metaAlbum  || '',
+    year:   row.dataset.metaYear   || '',
+    genre:  row.dataset.metaGenre  || '',
+  };
+  _populateMetaDialog(1, _metaTarget);
+  document.getElementById('meta-dialog')?.showModal();
+}
+
+function openMetaDialog() {
+  _metaTarget = null;
+  const entries = [...selectedItems.values()];
+  const single  = entries.length === 1 ? entries[0] : null;
+  _populateMetaDialog(entries.length, single);
+  document.getElementById('meta-dialog')?.showModal();
+}
+
+function _populateMetaDialog(count, entry) {
+  const titleEl = document.getElementById('meta-dialog-title');
+  if (titleEl) titleEl.textContent = count === 1 ? 'Теги аудио' : `Теги аудио (${count} файлов)`;
+  const noteEl  = document.getElementById('meta-count-note');
+  if (noteEl) noteEl.textContent = count > 1 ? `Будет применено к ${count} файлам` : '';
+  const fields = ['title', 'artist', 'album', 'year', 'genre'];
+  fields.forEach(f => {
+    const inp      = document.getElementById('meta-' + f);
+    const metaRow  = inp?.closest('.meta-row');
+    const check    = metaRow?.querySelector('.meta-check');
+    if (inp)   inp.value    = entry ? (entry[f] || '') : '';
+    if (check) check.checked = (count === 1);
+    metaRow?.classList.toggle('dimmed', !(count === 1 || (check && check.checked)));
+  });
+}
+
+function metaCheckChange(check) {
+  const row = check.closest('.meta-row');
+  const inp  = row?.querySelector('.meta-input');
+  if (row) row.classList.toggle('dimmed', !check.checked);
+  if (inp && check.checked) inp.focus();
+}
+
+async function applyMeta() {
+  const fields = {};
+  document.querySelectorAll('#meta-dialog .meta-row').forEach(row => {
+    const check = row.querySelector('.meta-check');
+    const inp   = row.querySelector('.meta-input');
+    if (check?.checked && inp) fields[row.dataset.field] = inp.value;
+  });
+  const dlg = document.getElementById('meta-dialog');
+  if (!Object.keys(fields).length) { dlg?.close(); return; }
+
+  let itemIds;
+  if (_metaTarget) {
+    itemIds = [_metaTarget.itemId];
+  } else {
+    itemIds = [...selectedItems.values()].map(e => e.itemId).filter(Boolean);
+  }
+  if (!itemIds.length) { dlg?.close(); return; }
+
+  const r = await fetch(base() + 'items/meta-bulk', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ item_ids: itemIds, fields }),
+  });
+  dlg?.close();
+  _metaTarget = null;
+  if (r.ok) {
+    clearSelection();
+    htmx.trigger(document.body, 'mediaRefresh');
+    showToast('Теги обновлены');
+  } else {
+    r.text().then(t => showToast('Ошибка: ' + t));
+  }
 }
 
 function bulkTag() {

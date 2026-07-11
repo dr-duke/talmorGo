@@ -78,6 +78,7 @@ func New(
 	mux.HandleFunc("DELETE /items/{id}", mh.Delete)
 	mux.HandleFunc("PATCH /items/{id}", mh.Rename)
 	mux.HandleFunc("PATCH /items/{id}/meta", mh.UpdateMeta)
+	mux.HandleFunc("POST /items/meta-bulk", mh.BulkMeta)
 	mux.HandleFunc("POST /items/{id}/link", mh.CreateLink)
 	mux.HandleFunc("POST /items/{id}/extract-audio", mh.ExtractAudio)
 	mux.HandleFunc("GET /items/deleted", mh.ListDeleted)

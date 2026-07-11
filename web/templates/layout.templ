@@ -348,6 +348,29 @@ templ Layout(title string, basePath string, siteName string) {
 					background: #080a0d;
 				}
 
+				/* ── Meta dialog ── */
+				dialog#meta-dialog {
+					background: var(--surface); border: 1px solid var(--border);
+					width: min(96vw, 480px);
+					box-shadow: 0 8px 48px rgba(0,0,0,.5);
+				}
+				dialog#meta-dialog[open] { display: flex; flex-direction: column; }
+				.meta-dialog-body { padding: .75rem 1rem 1rem; }
+				.meta-matrix { width: 100%; border-collapse: collapse; }
+				.meta-matrix td { padding: .3rem .4rem; vertical-align: middle; }
+				.meta-matrix td:first-child { width: 1.75rem; text-align: center; }
+				.meta-matrix td:nth-child(2) { width: 8rem; color: var(--text-muted); font-size: .85rem; }
+				.meta-row { transition: opacity .15s; }
+				.meta-row.dimmed { opacity: .35; }
+				.meta-input {
+					width: 100%; background: var(--surface-2); border: 1px solid var(--border);
+					border-radius: 6px; padding: .3rem .55rem; color: var(--text); font-size: .9rem;
+					box-sizing: border-box;
+				}
+				.meta-input:focus { outline: none; border-color: var(--accent); }
+				.meta-footer { display: flex; align-items: center; justify-content: flex-end; gap: .75rem; padding: .75rem 0 0; }
+				.meta-count-note { color: var(--text-muted); font-size: .85rem; flex: 1; }
+
 				/* ── Player bar ── */
 				.player-bar {
 					position: fixed; bottom: 0; left: 0; right: 0; height: 64px;

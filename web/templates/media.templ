@@ -68,6 +68,9 @@ templ ActionBar() {
 		<button class="btn btn-ghost btn-sm" onclick="bulkTag()">
 			<span class="mi">label</span>Тег
 		</button>
+		<button id="action-meta-btn" class="btn btn-ghost btn-sm" onclick="openMetaDialog()" style="display:none">
+			<span class="mi">music_note</span>Теги
+		</button>
 		<div class="coll-dropdown-wrap">
 			<button class="btn btn-ghost btn-sm" onclick="toggleCollDropdown()">
 				<span class="mi">folder_open</span>В коллекцию
@@ -93,6 +96,14 @@ templ mediaRow(item *model.MediaItem) {
 		if rowAvailable(item) {
 			data-stream={ fmt.Sprintf("items/%s/stream", item.Item.ID) }
 			data-kind={ item.Item.Kind }
+			data-item-id={ item.Item.ID }
+		}
+		if rowAvailable(item) && item.Item.IsAudio() {
+			data-meta-title={ item.Item.Meta.Title }
+			data-meta-artist={ item.Item.Meta.Artist }
+			data-meta-album={ item.Item.Meta.Album }
+			data-meta-year={ item.Item.Meta.Year }
+			data-meta-genre={ item.Item.Meta.Genre }
 		}
 	>
 		<label class="row-check" onclick="event.stopPropagation()">
@@ -220,6 +231,12 @@ templ mediaRow(item *model.MediaItem) {
 							onclick="renameFile(this.dataset.itemId, this.dataset.name)"
 							title="Переименовать"
 						><span class="mi">edit</span>Переименовать</button>
+						if item.Item.IsAudio() {
+							<button
+								class="row-menu-item"
+								onclick="openMetaFromMenu(this.closest('.media-row'))"
+							><span class="mi">music_note</span>Редактировать теги</button>
+						}
 					}
 					if item.Job.Source != "filesystem" {
 						<button

@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/dr-duke/talmorGo/internal/model"
@@ -177,6 +178,34 @@ func (r *sqliteItemRepo) UpdateMeta(ctx context.Context, id string, meta model.A
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE items SET title=?, artist=?, album=?, year=?, genre=? WHERE id=?`,
 		meta.Title, meta.Artist, meta.Album, meta.Year, meta.Genre, id)
+	return err
+}
+
+func (r *sqliteItemRepo) BulkUpdateMetaFields(ctx context.Context, ids []string, fields map[string]string) error {
+	if len(ids) == 0 || len(fields) == 0 {
+		return nil
+	}
+	// Белый список колонок — защита от SQL-инъекций через ключи map.
+	allowed := map[string]bool{"title": true, "artist": true, "album": true, "year": true, "genre": true}
+	var setClauses []string
+	var args []any
+	for _, col := range []string{"title", "artist", "album", "year", "genre"} {
+		if val, ok := fields[col]; ok && allowed[col] {
+			setClauses = append(setClauses, col+"=?")
+			args = append(args, val)
+		}
+	}
+	if len(setClauses) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	q := "UPDATE items SET " + strings.Join(setClauses, ", ") +
+		" WHERE id IN (" + strings.Join(placeholders, ", ") + ")"
+	_, err := r.db.ExecContext(ctx, q, args...)
 	return err
 }
 

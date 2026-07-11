@@ -30,6 +30,9 @@ type ItemRepo interface {
 	MarkLost(ctx context.Context, id string) error
 	MarkFound(ctx context.Context, id string) error
 	UpdateMeta(ctx context.Context, id string, meta model.AudioMeta) error
+	// BulkUpdateMetaFields обновляет только указанные поля (title/artist/album/year/genre)
+	// для набора элементов. Ключи, отсутствующие в fields, не затрагиваются.
+	BulkUpdateMetaFields(ctx context.Context, ids []string, fields map[string]string) error
 }
 
 type CollectionRepo interface {

@@ -239,6 +239,42 @@ func (h *MediaHandler) UpdateMeta(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// BulkMeta обновляет указанные аудио-теги для набора item ID.
+// Поля из request.Fields записываются в БД и в файлы через ffmpeg (ремукс без перекодирования).
+func (h *MediaHandler) BulkMeta(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ItemIDs []string          `json:"item_ids"`
+		Fields  map[string]string `json:"fields"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if len(req.ItemIDs) == 0 || len(req.Fields) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	ctx := r.Context()
+
+	if err := h.Items.BulkUpdateMetaFields(ctx, req.ItemIDs, req.Fields); err != nil {
+		slog.Error("bulk meta: db update", "err", err)
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+
+	for _, id := range req.ItemIDs {
+		item, err := h.Items.GetByID(ctx, id)
+		if err != nil || item.IsDeleted() || item.IsLost() || item.Kind != "audio" {
+			continue
+		}
+		if err := audio.WriteTags(ctx, h.Cfg.FfmpegBinary, item.Path, req.Fields); err != nil {
+			slog.Warn("bulk meta: write tags", "item_id", id, "err", err)
+		}
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // CreateLink создаёт или возвращает presigned-ссылку на элемент.
 func (h *MediaHandler) CreateLink(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

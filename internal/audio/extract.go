@@ -57,6 +57,41 @@ func run(ctx context.Context, ffmpegBin, input, output, audioCodec string, meta 
 	return nil
 }
 
+// WriteTags перезаписывает ID3-метаданные в существующем аудиофайле.
+// Обновляются только поля, присутствующие в fields (title/artist/album/year/genre).
+// Файл перезаписывается через временный — перекодирования нет, только ремукс.
+func WriteTags(ctx context.Context, ffmpegBin, path string, fields map[string]string) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	ext := filepath.Ext(path)
+	tmp := strings.TrimSuffix(path, ext) + ".tagtmp" + ext
+
+	args := []string{"-i", path, "-c", "copy"}
+	for _, f := range []string{"title", "artist", "album", "year", "genre"} {
+		if val, ok := fields[f]; ok {
+			key := f
+			if f == "year" {
+				key = "date"
+			}
+			args = append(args, "-metadata", key+"="+val)
+		}
+	}
+	args = append(args, "-y", tmp)
+
+	cmd := exec.CommandContext(ctx, ffmpegBin, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("ffmpeg write tags: %w: %s", err, truncate(string(out), 300))
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("replace file after tag write: %w", err)
+	}
+	return nil
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
