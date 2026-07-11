@@ -612,6 +612,43 @@ func TestPlayerCloses(t *testing.T) {
 	}
 }
 
+// T13b: Клик по backdrop плеера сворачивает его в bar, а не закрывает.
+func TestPlayerMinimizesOnBackdropClick(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.Close()
+	seedDone(t, env)
+
+	ctx, cancel := newTab(t)
+	defer cancel()
+
+	// Открываем плеер, кликаем на backdrop (левый верхний угол диалога вне контента).
+	err := chromedp.Run(ctx,
+		openMedia(env.URL),
+		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
+		chromedp.Click(`.status-done .row-title`, chromedp.ByQuery),
+		chromedp.WaitVisible(`#player-dialog[open]`, chromedp.ByQuery),
+		chromedp.MouseClickXY(5, 5),
+		chromedp.Sleep(200*time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("minimize player: %v", err)
+	}
+
+	var dialogOpen, barVisible bool
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`document.getElementById('player-dialog').open`, &dialogOpen),
+		chromedp.Evaluate(`document.getElementById('player-bar').classList.contains('visible')`, &barVisible),
+	); err != nil {
+		t.Fatalf("check state: %v", err)
+	}
+	if dialogOpen {
+		t.Error("player dialog still open after backdrop click")
+	}
+	if !barVisible {
+		t.Error("player bar not visible after backdrop click (expected minimize to bar)")
+	}
+}
+
 // T14: После удаления файла строка остаётся в статусе deleted с кнопкой «Скачать повторно».
 // Кнопка redownload работает — статус переходит в pending.
 func TestDeletedFileAllowsRedownload(t *testing.T) {

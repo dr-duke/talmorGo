@@ -481,7 +481,10 @@ function openLog(jobId, title) {
 
 /* ── Dialogs: close on backdrop click ── */
 document.addEventListener('click', (e) => {
-  if (e.target.tagName === 'DIALOG' && e.target.id !== 'player-dialog') {
+  if (e.target.tagName !== 'DIALOG') return;
+  if (e.target.id === 'player-dialog') {
+    playerMinimize();
+  } else {
     e.target.close();
   }
 });
