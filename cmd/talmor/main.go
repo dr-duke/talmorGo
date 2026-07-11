@@ -56,7 +56,8 @@ func main() {
 	pool.SetHub(hub)
 	pool.SetSettingsRepo(settingsRepo)
 
-	opsWorker := ops.NewWorker(operationRepo, tagRepo, jobRepo, itemRepo, cfg, hub)
+	store := storage.New(cfg.YtDlpOutputDir)
+	opsWorker := ops.NewWorker(operationRepo, tagRepo, jobRepo, itemRepo, store, cfg, hub)
 
 	var tgBot *bot.Bot
 	if cfg.TelegramBotToken != "" {
@@ -69,8 +70,6 @@ func main() {
 	} else {
 		slog.Info("TELEGRAM_BOT_TOKEN not set, running in web-only mode")
 	}
-
-	store := storage.New(cfg.YtDlpOutputDir)
 	srv := api.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, cookieRepo, settingsRepo, collectionRepo, operationRepo, store, pool, opsWorker, hub)
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPHost + ":" + cfg.HTTPPort,

@@ -10,20 +10,24 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/config"
+	"github.com/dr-duke/talmorGo/internal/model"
+	"github.com/dr-duke/talmorGo/internal/ops"
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/dr-duke/talmorGo/web/templates"
 )
 
 type SettingsHandler struct {
-	Cookies  repo.CookieRepo
-	Settings repo.SettingsRepo
-	Jobs     repo.JobRepo
-	Items    repo.ItemRepo
-	Tags     repo.TagRepo
-	Storage  *storage.Storage
-	Cfg      *config.Config
-	SiteName string
+	Cookies   repo.CookieRepo
+	Settings  repo.SettingsRepo
+	Jobs      repo.JobRepo
+	Items     repo.ItemRepo
+	Tags      repo.TagRepo
+	Storage   *storage.Storage
+	Cfg       *config.Config
+	SiteName  string
+	Ops       repo.OperationRepo
+	OpsWorker OpsEnqueuer
 }
 
 func (h *SettingsHandler) Page(w http.ResponseWriter, r *http.Request) {
@@ -162,32 +166,19 @@ func (h *SettingsHandler) rewriteFile(ctx context.Context) error {
 // Cleanup безвозвратно удаляет failed/hidden задания, их файлы с диска и из БД,
 // а также записи потерянных файлов (lost_at IS NOT NULL).
 func (h *SettingsHandler) Cleanup(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	paths, err := h.Items.PathsForCleanup(ctx)
-	if err != nil {
-		slog.Error("settings: cleanup paths", "err", err)
+	op := &model.Operation{
+		Kind:    ops.KindCleanup,
+		Title:   "Очистка библиотеки",
+		Payload: "{}",
 	}
-	for _, p := range paths {
-		if delErr := h.Storage.Delete(p); delErr != nil {
-			slog.Warn("settings: cleanup delete file", "path", p, "err", delErr)
-		}
+	if err := h.Ops.Create(r.Context(), op); err != nil {
+		slog.Error("settings: create cleanup op", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
-
-	nJobs, err := h.Jobs.CleanupDead(ctx)
-	if err != nil {
-		slog.Error("settings: cleanup dead jobs", "err", err)
-	}
-
-	nFiles, err := h.Items.PruneLost(ctx)
-	if err != nil {
-		slog.Error("settings: prune lost files", "err", err)
-	}
-
-	msg := fmt.Sprintf("Удалено заданий: %d, файлов на диске: %d, записей потерянных файлов: %d",
-		nJobs, len(paths), nFiles)
+	h.OpsWorker.Enqueue()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<p class="cleanup-result">%s</p>`, msg)
+	fmt.Fprint(w, `<p class="cleanup-result">Операция запущена…</p>`)
 }
 
 // parseCookiesByDomain группирует строки Netscape-файла по домену (первая колонка).
@@ -214,42 +205,17 @@ func parseCookiesByDomain(raw string) map[string][]string {
 
 // Reindex очищает осиротевшие теги/коллекции и проверяет доступность файлов на диске.
 func (h *SettingsHandler) Reindex(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	nJobTags, nTags, nCollections, err := h.Tags.PruneOrphans(ctx)
-	if err != nil {
-		slog.Error("settings: reindex prune orphans", "err", err)
+	op := &model.Operation{
+		Kind:    ops.KindReindex,
+		Title:   "Пересчёт тегов и коллекций",
+		Payload: "{}",
 	}
-
-	items, err := h.Items.ListAll(ctx)
-	if err != nil {
-		slog.Error("settings: reindex list items", "err", err)
+	if err := h.Ops.Create(r.Context(), op); err != nil {
+		slog.Error("settings: create reindex op", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
-	lost, found := 0, 0
-	for _, item := range items {
-		if item.IsDeleted() {
-			continue
-		}
-		_, statErr := os.Stat(item.Path)
-		missing := os.IsNotExist(statErr)
-		if missing && !item.IsLost() {
-			if markErr := h.Items.MarkLost(ctx, item.ID); markErr == nil {
-				lost++
-			}
-		} else if !missing && item.IsLost() {
-			if markErr := h.Items.MarkFound(ctx, item.ID); markErr == nil {
-				found++
-			}
-		}
-	}
-
-	slog.Info("settings: reindex done",
-		"job_tags_pruned", nJobTags, "tags_pruned", nTags, "collections_pruned", nCollections,
-		"files_lost", lost, "files_found", found)
-
-	msg := fmt.Sprintf(
-		"Привязок удалено: %d, тегов: %d, коллекций: %d. Файлов: потеряно %d, восстановлено %d.",
-		nJobTags, nTags, nCollections, lost, found)
+	h.OpsWorker.Enqueue()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<p class="cleanup-result">%s</p>`, msg)
+	fmt.Fprint(w, `<p class="cleanup-result">Операция запущена…</p>`)
 }

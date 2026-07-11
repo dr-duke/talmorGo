@@ -7,11 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 
 	"github.com/a-h/templ"
-	"github.com/dr-duke/talmorGo/internal/audio"
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/ops"
@@ -247,6 +244,8 @@ func (h *MediaHandler) Rename(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateMeta обновляет аудио-метаданные элемента.
+// UpdateMeta ставит операцию обновления тегов одного аудиофайла в очередь.
+// В отличие от BulkMeta, записывает все 5 полей (пустое значение очищает тег).
 func (h *MediaHandler) UpdateMeta(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var meta model.AudioMeta
@@ -254,12 +253,30 @@ func (h *MediaHandler) UpdateMeta(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if err := h.Items.UpdateMeta(r.Context(), id, meta); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	fields := map[string]string{
+		"title":  meta.Title,
+		"artist": meta.Artist,
+		"album":  meta.Album,
+		"year":   meta.Year,
+		"genre":  meta.Genre,
+	}
+	payload, _ := json.Marshal(struct {
+		ItemID string            `json:"item_id"`
+		Fields map[string]string `json:"fields"`
+	}{ItemID: id, Fields: fields})
+	op := &model.Operation{
+		Kind:    ops.KindUpdateMeta,
+		Title:   "Теги аудио → 1 файл",
+		Payload: string(payload),
+	}
+	if err := h.Ops.Create(r.Context(), op); err != nil {
+		slog.Error("update meta: create op", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	h.OpsWorker.Enqueue()
 	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusAccepted)
 }
 
 // BulkMeta ставит операцию обновления аудио-тегов в очередь (асинхронно).
@@ -399,6 +416,7 @@ func (h *MediaHandler) ListDeleted(w http.ResponseWriter, r *http.Request) {
 }
 
 // ExtractAudio извлекает аудиодорожку из скачанного видеофайла.
+// ExtractAudio ставит задачу извлечения аудиодорожки в очередь (асинхронно через ffmpeg).
 func (h *MediaHandler) ExtractAudio(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	srcItem, err := h.Items.GetByID(r.Context(), id)
@@ -410,42 +428,21 @@ func (h *MediaHandler) ExtractAudio(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "item not available", http.StatusGone)
 		return
 	}
-
-	var meta model.AudioMeta
-	if job, err := h.Jobs.GetByID(r.Context(), srcItem.JobID); err == nil {
-		meta.Title = job.Title
-		meta.Artist = job.Domain()
+	payload, _ := json.Marshal(struct {
+		ItemID string `json:"item_id"`
+	}{ItemID: id})
+	op := &model.Operation{
+		Kind:    ops.KindExtractAudio,
+		Title:   "Извлечь аудио: " + srcItem.Name,
+		Payload: string(payload),
 	}
-
-	audioDir := h.Cfg.AudioDir()
-	outPath, err := audio.Extract(r.Context(), h.Cfg.FfmpegBinary, srcItem.Path, audioDir, meta)
-	if err != nil {
-		slog.Error("extract audio", "item_id", id, "err", err)
-		http.Error(w, "audio extraction failed: "+err.Error(), http.StatusInternalServerError)
+	if err := h.Ops.Create(r.Context(), op); err != nil {
+		slog.Error("extract audio: create op", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-
-	info, _ := os.Stat(outPath)
-	var size int64
-	if info != nil {
-		size = info.Size()
-	}
-
-	audioItem := &model.Item{
-		JobID: srcItem.JobID,
-		Kind:  "audio",
-		Path:  outPath,
-		Name:  filepath.Base(outPath),
-		Size:  size,
-		Meta:  meta,
-	}
-	if err := h.Items.Create(r.Context(), audioItem); err != nil {
-		slog.Error("extract audio: save item", "err", err)
-	}
-
-	slog.Info("audio extracted", "src", srcItem.Path, "dst", outPath)
-
-	trigger, _ := json.Marshal(map[string]any{"showToast": filepath.Base(outPath), "mediaRefresh": true})
+	h.OpsWorker.Enqueue()
+	trigger, _ := json.Marshal(map[string]any{"showToast": "Извлечение аудио запущено", "mediaRefresh": true})
 	w.Header().Set("HX-Trigger", string(trigger))
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusAccepted)
 }

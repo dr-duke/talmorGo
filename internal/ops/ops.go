@@ -2,17 +2,25 @@
 package ops
 
 const (
-	KindBulkTag  = "bulk_tag"
-	KindBulkHide = "bulk_hide"
-	KindBulkMeta = "bulk_meta"
+	KindBulkTag      = "bulk_tag"
+	KindBulkHide     = "bulk_hide"
+	KindBulkMeta     = "bulk_meta"
+	KindExtractAudio = "extract_audio"
+	KindUpdateMeta   = "update_meta"
+	KindReindex      = "reindex"
+	KindCleanup      = "cleanup"
 )
 
 // ShowInQueue управляет тем, отображается ли каждый вид операций в UI очереди.
 // Присвойте false, чтобы скрыть конкретный тип — операции будут по-прежнему выполняться.
 var ShowInQueue = map[string]bool{
-	KindBulkTag:  true,
-	KindBulkHide: true,
-	KindBulkMeta: true,
+	KindBulkTag:      true,
+	KindBulkHide:     true,
+	KindBulkMeta:     true,
+	KindExtractAudio: true,
+	KindUpdateMeta:   true,
+	KindReindex:      false, // системные операции — не отображаем в очереди
+	KindCleanup:      false,
 }
 
 // VisibleKinds возвращает виды операций, включённые для отображения в очереди.
