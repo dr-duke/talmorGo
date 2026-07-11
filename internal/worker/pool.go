@@ -227,6 +227,10 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 			continue
 		}
 
+		if jobCtx.Err() != nil {
+			continue
+		}
+
 		finalPath := filepath.Join(p.cfg.YtDlpOutputDir, event.FileName)
 		p.inFlight.Add(finalPath)
 		if err := moveFile(event.Path, finalPath); err != nil {

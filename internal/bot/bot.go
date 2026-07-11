@@ -27,11 +27,12 @@ type Bot struct {
 	tokens   repo.TokenRepo
 	items    repo.ItemRepo
 	tags     repo.TagRepo
+	settings repo.SettingsRepo
 	pool     Enqueuer
 	expander *playlist.Expander
 }
 
-func New(cfg *config.Config, jobs repo.JobRepo, items repo.ItemRepo, tokens repo.TokenRepo, tags repo.TagRepo, pool Enqueuer) (*Bot, error) {
+func New(cfg *config.Config, jobs repo.JobRepo, items repo.ItemRepo, tokens repo.TokenRepo, tags repo.TagRepo, pool Enqueuer, settings repo.SettingsRepo) (*Bot, error) {
 	var httpClient *http.Client
 	if cfg.TelegramProxy != "" {
 		proxyURL, err := url.Parse(cfg.TelegramProxy)
@@ -58,7 +59,8 @@ func New(cfg *config.Config, jobs repo.JobRepo, items repo.ItemRepo, tokens repo
 	slog.Info("bot: authorized", "username", api.Self.UserName)
 
 	b := &Bot{
-		cfg: cfg, api: api, jobs: jobs, items: items, tokens: tokens, tags: tags, pool: pool,
+		cfg: cfg, api: api, jobs: jobs, items: items, tokens: tokens, tags: tags,
+		settings: settings, pool: pool,
 		expander: playlist.New(jobs, tags),
 	}
 	b.setCommands()

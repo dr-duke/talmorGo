@@ -110,18 +110,42 @@ func (b *Bot) handleQueue(ctx context.Context, chatID int64) {
 	b.send(chatID, sb.String())
 }
 
+// resolveDownloaderOpts собирает параметры yt-dlp с учётом runtime-настроек из БД.
+func (b *Bot) resolveDownloaderOpts(ctx context.Context) downloader.Options {
+	proxy := b.cfg.YtDlpProxy
+	maxFiles := b.cfg.YtDlpMaxFilesPerRequest
+	timeout := time.Duration(b.cfg.YtDlpTimeout) * time.Second
+
+	if b.settings != nil {
+		if v, _ := b.settings.Get(ctx, "yt_dlp_proxy"); v != "" {
+			proxy = v
+		}
+		if v, _ := b.settings.Get(ctx, "yt_dlp_max_files"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				maxFiles = n
+			}
+		}
+		if v, _ := b.settings.Get(ctx, "yt_dlp_timeout"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				timeout = time.Duration(n) * time.Second
+			}
+		}
+	}
+	return downloader.Options{
+		Binary:   b.cfg.YtDlpBinary,
+		Proxy:    proxy,
+		MaxFiles: maxFiles,
+		Timeout:  timeout,
+	}
+}
+
 func (b *Bot) handleURL(ctx context.Context, msg *tgbotapi.Message) {
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
 		return
 	}
 
-	dlOpts := downloader.Options{
-		Binary:   b.cfg.YtDlpBinary,
-		Proxy:    b.cfg.YtDlpProxy,
-		MaxFiles: b.cfg.YtDlpMaxFilesPerRequest,
-		Timeout:  time.Duration(b.cfg.YtDlpTimeout) * time.Second,
-	}
+	dlOpts := b.resolveDownloaderOpts(ctx)
 
 	var added, invalid int
 	for _, part := range strings.Fields(text) {

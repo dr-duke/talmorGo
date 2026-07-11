@@ -61,7 +61,7 @@ func main() {
 
 	var tgBot *bot.Bot
 	if cfg.TelegramBotToken != "" {
-		tgBot, err = bot.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, pool)
+		tgBot, err = bot.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, pool, settingsRepo)
 		if err != nil {
 			slog.Warn("bot init failed, running without telegram", "err", err)
 		} else {

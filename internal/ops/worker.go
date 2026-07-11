@@ -64,6 +64,11 @@ func (w *Worker) Start(ctx context.Context) {
 }
 
 func (w *Worker) drainPending(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("ops: panic in drainPending", "panic", r)
+		}
+	}()
 	for {
 		op, err := w.Ops.ClaimNext(ctx)
 		if err != nil {
@@ -106,6 +111,13 @@ func (w *Worker) drainPending(ctx context.Context) {
 			}
 		}
 		w.Hub.Broadcast() // уведомить UI: операция завершена
+
+		// Невидимые операции удаляем сразу — они не нужны в очереди и не имеют кнопки dismiss.
+		if !ShowInQueue[op.Kind] {
+			if err := w.Ops.Delete(ctx, op.ID); err != nil {
+				slog.Warn("ops: delete hidden op record", "id", op.ID, "err", err)
+			}
+		}
 	}
 }
 
@@ -232,14 +244,24 @@ func (w *Worker) execUpdateMeta(ctx context.Context, op *model.Operation) error 
 	if err := json.Unmarshal([]byte(op.Payload), &p); err != nil {
 		return err
 	}
-	if err := w.Items.BulkUpdateMetaFields(ctx, []string{p.ItemID}, p.Fields); err != nil {
+	// Пропускаем пустые значения — пустое поле означает «не трогать», а не «очистить».
+	fields := make(map[string]string, len(p.Fields))
+	for k, v := range p.Fields {
+		if v != "" {
+			fields[k] = v
+		}
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	if err := w.Items.BulkUpdateMetaFields(ctx, []string{p.ItemID}, fields); err != nil {
 		return err
 	}
 	item, err := w.Items.GetByID(ctx, p.ItemID)
 	if err != nil || item.IsDeleted() || item.IsLost() || item.Kind != "audio" {
 		return nil
 	}
-	return audio.WriteTags(ctx, w.Cfg.FfmpegBinary, item.Path, p.Fields)
+	return audio.WriteTags(ctx, w.Cfg.FfmpegBinary, item.Path, fields)
 }
 
 // ── Reindex ──────────────────────────────────────────────────────────────────

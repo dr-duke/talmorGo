@@ -98,7 +98,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	cookieRepo := repo.NewCookieRepo(database)
 
 	cfg := &config.Config{BaseURL: "", BasePath: "", SiteName: "TalmorGo"}
-	srv := api.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, cookieRepo, repo.NewSettingsRepo(database), repo.NewCollectionRepo(database), storage.New(tmpDir), &fakePool{}, sse.New())
+	fp := &fakePool{}
+	srv := api.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, cookieRepo, repo.NewSettingsRepo(database), repo.NewCollectionRepo(database), repo.NewOperationRepo(database), storage.New(tmpDir), fp, fp, sse.New())
 	ts := httptest.NewServer(srv.Handler())
 
 	return &testEnv{
