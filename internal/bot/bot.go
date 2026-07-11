@@ -72,6 +72,7 @@ func (b *Bot) setCommands() {
 		tgbotapi.BotCommand{Command: "queue", Description: "Активные задачи"},
 		tgbotapi.BotCommand{Command: "last", Description: "Последние файлы (/last N, по умолчанию 5)"},
 		tgbotapi.BotCommand{Command: "search", Description: "Поиск по файлам (/search запрос)"},
+		tgbotapi.BotCommand{Command: "web", Description: "Перейти на сайт"},
 		tgbotapi.BotCommand{Command: "help", Description: "Помощь"},
 	)
 	if _, err := b.api.Request(cmds); err != nil {

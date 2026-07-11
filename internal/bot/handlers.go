@@ -51,6 +51,8 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		b.handleSearch(ctx, msg.Chat.ID, msg.CommandArguments())
 	case "last":
 		b.handleLast(ctx, msg.Chat.ID, msg.CommandArguments())
+	case "web":
+		b.send(msg.Chat.ID, "🌐 "+b.cfg.BaseURL)
 	default:
 		b.send(msg.Chat.ID, "Неизвестная команда. Отправь /help")
 	}
