@@ -13,6 +13,7 @@ import (
 	"github.com/dr-duke/talmorGo/internal/bot"
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/db"
+	"github.com/dr-duke/talmorGo/internal/ops"
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/sse"
 	"github.com/dr-duke/talmorGo/internal/storage"
@@ -47,12 +48,15 @@ func main() {
 	cookieRepo := repo.NewCookieRepo(database)
 	settingsRepo := repo.NewSettingsRepo(database)
 	collectionRepo := repo.NewCollectionRepo(database)
+	operationRepo := repo.NewOperationRepo(database)
 
 	hub := sse.New()
 
 	pool := worker.NewPool(cfg, jobRepo, itemRepo, tokenRepo, nil)
 	pool.SetHub(hub)
 	pool.SetSettingsRepo(settingsRepo)
+
+	opsWorker := ops.NewWorker(operationRepo, tagRepo, jobRepo, itemRepo, cfg, hub)
 
 	var tgBot *bot.Bot
 	if cfg.TelegramBotToken != "" {
@@ -67,7 +71,7 @@ func main() {
 	}
 
 	store := storage.New(cfg.YtDlpOutputDir)
-	srv := api.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, cookieRepo, settingsRepo, collectionRepo, store, pool, hub)
+	srv := api.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, cookieRepo, settingsRepo, collectionRepo, operationRepo, store, pool, opsWorker, hub)
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPHost + ":" + cfg.HTTPPort,
 		Handler: srv.Handler(),
@@ -87,6 +91,7 @@ func main() {
 	}()
 
 	go pool.Start(ctx)
+	go opsWorker.Start(ctx)
 	if tgBot != nil {
 		go tgBot.Start(ctx)
 	}

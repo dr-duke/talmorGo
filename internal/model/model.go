@@ -74,6 +74,29 @@ func (j *Job) Domain() string {
 	return u.Hostname()
 }
 
+// OpStatus — статус фоновой операции.
+type OpStatus string
+
+const (
+	OpPending OpStatus = "pending"
+	OpRunning OpStatus = "running"
+	OpDone    OpStatus = "done"
+	OpFailed  OpStatus = "failed"
+)
+
+// Operation — пакетная фоновая операция (bulk_tag / bulk_hide / bulk_meta и др.).
+type Operation struct {
+	ID         string
+	Kind       string
+	Status     OpStatus
+	Title      string
+	Payload    string // JSON-блоб с параметрами операции
+	CreatedAt  time.Time
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	Error      string
+}
+
 // AudioMeta — ID3-метаданные аудиоэлемента.
 type AudioMeta struct {
 	Title  string

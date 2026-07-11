@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,11 +14,17 @@ import (
 	"github.com/dr-duke/talmorGo/internal/audio"
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/model"
+	"github.com/dr-duke/talmorGo/internal/ops"
 	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/dr-duke/talmorGo/web/templates"
 )
+
+// OpsEnqueuer уведомляет воркер пакетных операций о новой задаче.
+type OpsEnqueuer interface {
+	Enqueue()
+}
 
 type MediaHandler struct {
 	Jobs        repo.JobRepo
@@ -31,6 +38,8 @@ type MediaHandler struct {
 	Settings    repo.SettingsRepo
 	Collections repo.CollectionRepo
 	Expander    *playlist.Expander
+	Ops         repo.OperationRepo
+	OpsWorker   OpsEnqueuer
 }
 
 // LibrarySidebar отдаёт HTML-фрагмент сайдбара с коллекциями (для обновления после изменения коллекций).
@@ -65,7 +74,7 @@ func (h *MediaHandler) TagsFragment(w http.ResponseWriter, r *http.Request) {
 	templ.Handler(templates.TagCloud(tagCounts)).ServeHTTP(w, r)
 }
 
-// BulkTag назначает тег набору заданий.
+// BulkTag ставит операцию назначения тега в очередь (асинхронно).
 func (h *MediaHandler) BulkTag(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		TagName string   `json:"tag"`
@@ -75,19 +84,23 @@ func (h *MediaHandler) BulkTag(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	tag, err := h.Tags.Upsert(r.Context(), body.TagName)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	payload, _ := json.Marshal(body)
+	op := &model.Operation{
+		Kind:    ops.KindBulkTag,
+		Title:   fmt.Sprintf("Тег «%s» → %d заданий", body.TagName, len(body.JobIDs)),
+		Payload: string(payload),
+	}
+	if err := h.Ops.Create(r.Context(), op); err != nil {
+		slog.Error("bulk tag: create op", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if err := h.Tags.BulkAddToJobs(r.Context(), tag.ID, body.JobIDs); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	h.OpsWorker.Enqueue()
+	w.Header().Set("HX-Trigger", "mediaRefresh")
+	w.WriteHeader(http.StatusAccepted)
 }
 
-// BulkHide скрывает набор заданий.
+// BulkHide ставит операцию скрытия в очередь (асинхронно).
 func (h *MediaHandler) BulkHide(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		JobIDs []string `json:"job_ids"`
@@ -96,10 +109,20 @@ func (h *MediaHandler) BulkHide(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	for _, id := range body.JobIDs {
-		h.Jobs.Hide(r.Context(), id) //nolint:errcheck
+	payload, _ := json.Marshal(body)
+	op := &model.Operation{
+		Kind:    ops.KindBulkHide,
+		Title:   fmt.Sprintf("Скрыть %d заданий", len(body.JobIDs)),
+		Payload: string(payload),
 	}
-	w.WriteHeader(http.StatusNoContent)
+	if err := h.Ops.Create(r.Context(), op); err != nil {
+		slog.Error("bulk hide: create op", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	h.OpsWorker.Enqueue()
+	w.Header().Set("HX-Trigger", "mediaRefresh")
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func parseMediaFilter(r *http.Request) model.MediaFilter {
@@ -239,8 +262,7 @@ func (h *MediaHandler) UpdateMeta(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// BulkMeta обновляет указанные аудио-теги для набора item ID.
-// Поля из request.Fields записываются в БД и в файлы через ffmpeg (ремукс без перекодирования).
+// BulkMeta ставит операцию обновления аудио-тегов в очередь (асинхронно).
 func (h *MediaHandler) BulkMeta(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ItemIDs []string          `json:"item_ids"`
@@ -254,25 +276,20 @@ func (h *MediaHandler) BulkMeta(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	ctx := r.Context()
-
-	if err := h.Items.BulkUpdateMetaFields(ctx, req.ItemIDs, req.Fields); err != nil {
-		slog.Error("bulk meta: db update", "err", err)
-		http.Error(w, "db error", http.StatusInternalServerError)
+	payload, _ := json.Marshal(req)
+	op := &model.Operation{
+		Kind:    ops.KindBulkMeta,
+		Title:   fmt.Sprintf("Теги аудио → %d файлов", len(req.ItemIDs)),
+		Payload: string(payload),
+	}
+	if err := h.Ops.Create(r.Context(), op); err != nil {
+		slog.Error("bulk meta: create op", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-
-	for _, id := range req.ItemIDs {
-		item, err := h.Items.GetByID(ctx, id)
-		if err != nil || item.IsDeleted() || item.IsLost() || item.Kind != "audio" {
-			continue
-		}
-		if err := audio.WriteTags(ctx, h.Cfg.FfmpegBinary, item.Path, req.Fields); err != nil {
-			slog.Warn("bulk meta: write tags", "item_id", id, "err", err)
-		}
-	}
-
-	w.WriteHeader(http.StatusNoContent)
+	h.OpsWorker.Enqueue()
+	w.Header().Set("HX-Trigger", "mediaRefresh")
+	w.WriteHeader(http.StatusAccepted)
 }
 
 // CreateLink создаёт или возвращает presigned-ссылку на элемент.

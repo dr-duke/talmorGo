@@ -91,6 +91,19 @@ type TagRepo interface {
 	PruneOrphans(ctx context.Context) (nJobTags, nTags, nCollections int, err error)
 }
 
+type OperationRepo interface {
+	Create(ctx context.Context, op *model.Operation) error
+	// ClaimNext атомарно переводит старейшую pending-операцию в running и возвращает её.
+	// Возвращает nil, nil если очередь пуста.
+	ClaimNext(ctx context.Context) (*model.Operation, error)
+	SetDone(ctx context.Context, id string) error
+	SetFailed(ctx context.Context, id, errMsg string) error
+	// List возвращает операции заданных видов (все статусы, кроме deleted).
+	// Пустой kinds — вернуть все.
+	List(ctx context.Context, kinds []string) ([]*model.Operation, error)
+	Delete(ctx context.Context, id string) error
+}
+
 type SettingsRepo interface {
 	Get(ctx context.Context, key string) (string, error)
 	Set(ctx context.Context, key, value string) error

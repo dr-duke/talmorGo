@@ -10,6 +10,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/model"
+	"github.com/dr-duke/talmorGo/internal/ops"
 	"github.com/dr-duke/talmorGo/internal/playlist"
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/web/templates"
@@ -24,6 +25,7 @@ type Enqueuer interface {
 type QueueHandler struct {
 	Jobs     repo.JobRepo
 	Tags     repo.TagRepo
+	Ops      repo.OperationRepo
 	Pool     Enqueuer
 	Cfg      *config.Config
 	Settings repo.SettingsRepo
@@ -111,7 +113,7 @@ func (h *QueueHandler) CancelAll(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Items отдаёт HTMX-фрагмент со списком задач очереди (checking/pending/running/retrying/failed/cancelled).
+// Items отдаёт HTMX-фрагмент со списком задач очереди и фоновых операций.
 func (h *QueueHandler) Items(w http.ResponseWriter, r *http.Request) {
 	jobs, err := h.Jobs.List(r.Context(), repo.JobFilter{
 		Statuses: []model.JobStatus{
@@ -123,7 +125,23 @@ func (h *QueueHandler) Items(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	templ.Handler(templates.QueueItems(jobs)).ServeHTTP(w, r)
+	operations, err := h.Ops.List(r.Context(), ops.VisibleKinds())
+	if err != nil {
+		slog.Warn("queue: list ops", "err", err)
+		operations = nil
+	}
+	templ.Handler(templates.QueueItems(jobs, operations)).ServeHTTP(w, r)
+}
+
+// DismissOp удаляет завершённую или упавшую операцию из очереди.
+func (h *QueueHandler) DismissOp(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := h.Ops.Delete(r.Context(), id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("HX-Trigger", "mediaRefresh")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Retry переводит failed-задачу обратно в pending.

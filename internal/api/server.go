@@ -31,8 +31,10 @@ func New(
 	cookies repo.CookieRepo,
 	settings repo.SettingsRepo,
 	collections repo.CollectionRepo,
+	operations repo.OperationRepo,
 	store *storage.Storage,
 	pool handler.Enqueuer,
+	opsWorker handler.OpsEnqueuer,
 	hub *sse.Hub,
 ) *Server {
 	basePath := strings.TrimRight(cfg.BasePath, "/")
@@ -43,12 +45,13 @@ func New(
 	expander := playlist.New(jobs, tags)
 	expander.Hub = hub
 
-	qh := &handler.QueueHandler{Jobs: jobs, Tags: tags, Pool: pool, Cfg: cfg, Settings: settings, Expander: expander}
+	qh := &handler.QueueHandler{Jobs: jobs, Tags: tags, Ops: operations, Pool: pool, Cfg: cfg, Settings: settings, Expander: expander}
 	mh := &handler.MediaHandler{
 		Jobs: jobs, Items: items, Tags: tags,
 		Tokens: tokens, Storage: store,
 		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg, Settings: settings,
 		Collections: collections, Expander: expander,
+		Ops: operations, OpsWorker: opsWorker,
 	}
 	ch := &handler.CollectionHandler{Collections: collections}
 	lh := &handler.LinkHandler{Tokens: tokens, Items: items}
@@ -108,6 +111,7 @@ func New(
 	mux.HandleFunc("POST /queue/cancel-all", qh.CancelAll)
 	mux.HandleFunc("GET /queue/items", qh.Items)
 	mux.HandleFunc("POST /jobs/{id}/retry", qh.Retry)
+	mux.HandleFunc("DELETE /operations/{id}", qh.DismissOp)
 
 	// Настройки.
 	mux.HandleFunc("GET /settings", sh.Page)

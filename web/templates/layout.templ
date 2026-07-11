@@ -294,6 +294,17 @@ templ Layout(title string, basePath string, siteName string) {
 				.queue-domain { font-size: .72rem; color: var(--text-2); }
 				.queue-retry { font-size: .68rem; color: var(--warn-fg); }
 				.queue-row-actions { display: flex; gap: .15rem; align-items: center; flex-shrink: 0; }
+				/* ── Op rows (фоновые операции) ── */
+				.op-row { border-left: 2px solid transparent; }
+				.op-row.op-running { border-left-color: var(--accent); }
+				.op-row.op-failed  { border-left-color: var(--danger); }
+				.op-row.op-done    { opacity: .7; }
+				.op-status-icon { flex-shrink: 0; width: 1.4rem; text-align: center; }
+				.op-error { font-size: .72rem; color: var(--danger); margin-top: .1rem;
+					overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+				.queue-section-divider { height: 1px; background: var(--border-soft); margin: .2rem 0; }
+				@keyframes op-spin { to { transform: rotate(360deg); } }
+				.op-spin { display: inline-block; animation: op-spin .8s linear infinite; }
 
 				/* ── Empty state ── */
 				.empty-state {
