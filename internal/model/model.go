@@ -204,6 +204,7 @@ type MediaFilter struct {
 	Query string   // текстовый поиск (имя файла, URL, заголовок)
 	Kind  string   // "" | "video" | "audio"
 	Tags  []string // AND-пересечение тегов (включая коллекции)
+	Limit int      // максимум строк; 0 = без ограничений
 }
 
 // CookieRecord — куки одного домена (Netscape-формат).

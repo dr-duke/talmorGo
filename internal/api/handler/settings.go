@@ -50,7 +50,7 @@ func (h *SettingsHandler) SaveRuntimeSettings(w http.ResponseWriter, r *http.Req
 		return
 	}
 	ctx := r.Context()
-	keys := []string{"yt_dlp_proxy", "yt_dlp_extra_args", "yt_dlp_output_format", "yt_dlp_max_files", "yt_dlp_timeout"}
+	keys := []string{"yt_dlp_proxy", "yt_dlp_extra_args", "yt_dlp_output_format", "yt_dlp_max_files", "yt_dlp_timeout", "lib_page_size"}
 	for _, k := range keys {
 		val := strings.TrimSpace(r.FormValue(k))
 		if err := h.Settings.Set(ctx, k, val); err != nil {
@@ -80,6 +80,7 @@ func (h *SettingsHandler) runtimeDefaults() map[string]string {
 		"yt_dlp_output_format": h.Cfg.YtDlpOutputFormat,
 		"yt_dlp_max_files":     fmt.Sprintf("%d", h.Cfg.YtDlpMaxFilesPerRequest),
 		"yt_dlp_timeout":       fmt.Sprintf("%d", h.Cfg.YtDlpTimeout),
+		"lib_page_size":        fmt.Sprintf("%d", h.Cfg.LibPageSize),
 	}
 }
 

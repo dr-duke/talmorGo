@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/config"
@@ -51,24 +53,83 @@ func (h *MediaHandler) LibrarySidebar(w http.ResponseWriter, r *http.Request) {
 
 // LibraryItems — фрагмент списка элементов (HTMX, поддерживает фильтрацию).
 func (h *MediaHandler) LibraryItems(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	f := parseMediaFilter(r)
-	items, err := h.Jobs.FilterMedia(r.Context(), f)
+	f.Limit = h.resolvePageSize(ctx)
+
+	items, err := h.Jobs.FilterMedia(ctx, f)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	tagCounts, _ := h.Tags.ListWithCount(r.Context())
-	templ.Handler(templates.ItemList(items, tagCounts, f)).ServeHTTP(w, r)
+
+	total := len(items)
+	if len(items) >= f.Limit {
+		total, _ = h.Jobs.CountMedia(ctx, f)
+	}
+
+	templ.Handler(templates.ItemList(items, total, f)).ServeHTTP(w, r)
 }
 
-// TagsFragment отдаёт HTML-фрагмент облака тегов.
+// TagsFragment отдаёт HTML-фрагмент облака тегов с учётом текущего фильтра.
 func (h *MediaHandler) TagsFragment(w http.ResponseWriter, r *http.Request) {
-	tagCounts, err := h.Tags.ListWithCount(r.Context())
+	ctx := r.Context()
+	f := parseMediaFilter(r)
+	tagCounts, err := h.Tags.ListWithCountFiltered(ctx, f)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	templ.Handler(templates.TagCloud(tagCounts)).ServeHTTP(w, r)
+	activeTag := ""
+	if len(f.Tags) > 0 {
+		activeTag = f.Tags[0]
+	}
+	templ.Handler(templates.TagCloud(tagCounts, activeTag)).ServeHTTP(w, r)
+}
+
+// PlaylistItems возвращает JSON-список {stream, title} для всех видео, соответствующих
+// текущему фильтру. Используется для серверной сборки плейлиста "Play All".
+func (h *MediaHandler) PlaylistItems(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	f := parseMediaFilter(r)
+	f.Kind = "video"
+	f.Limit = 0 // без ограничений
+
+	items, err := h.Jobs.FilterMedia(ctx, f)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+
+	type entry struct {
+		Stream string `json:"stream"`
+		Title  string `json:"title"`
+	}
+	basePath := strings.TrimRight(h.Cfg.BasePath, "/")
+	result := make([]entry, 0, len(items))
+	for _, mi := range items {
+		if mi.Item == nil || !mi.Item.IsAvailable() {
+			continue
+		}
+		result = append(result, entry{
+			Stream: basePath + "/items/" + mi.Item.ID + "/stream",
+			Title:  mi.DisplayTitle(),
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result) //nolint:errcheck
+}
+
+// resolvePageSize читает размер страницы из runtime-настроек, fallback на cfg.
+func (h *MediaHandler) resolvePageSize(ctx context.Context) int {
+	if h.Settings != nil {
+		if v, _ := h.Settings.Get(ctx, "lib_page_size"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	return h.Cfg.LibPageSize
 }
 
 // BulkTag ставит операцию назначения тега в очередь (асинхронно).

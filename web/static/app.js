@@ -58,6 +58,8 @@ function applyFilter() {
   if (ft) ft.value = filter.tag;
   const inner = document.getElementById('media-inner');
   if (inner) htmx.trigger(inner, 'mediaRefresh');
+  // Обновляем облако тегов с учётом нового фильтра
+  htmx.trigger(document.body, 'tagsRefresh');
 }
 
 function setKind(btn, kind) {
@@ -184,10 +186,23 @@ let _minimizing  = false;  // flag: dialog close triggered by playerMinimize()
 let playlist = [];
 let playlistIndex = -1;
 
+// buildPlaylist — DOM-based, только видимые строки (используется при клике по строке).
 function buildPlaylist() {
   return Array.from(
     document.querySelectorAll('#media-inner .media-row[data-stream][data-kind="video"]')
   ).map(row => ({ stream: row.dataset.stream, title: row.dataset.title }));
+}
+
+// fetchPlaylist — серверный плейлист по текущему фильтру (без ограничения страницей).
+async function fetchPlaylist() {
+  const params = new URLSearchParams();
+  if (filter.q)    params.set('q', filter.q);
+  if (filter.kind) params.set('kind', filter.kind);
+  if (filter.tag)  params.set('tag', filter.tag);
+  const base = document.documentElement.dataset.basePath || '';
+  const resp = await fetch(base + '/library/playlist?' + params.toString());
+  if (!resp.ok) return [];
+  return resp.json();
 }
 
 /* ── Entry points ── */
@@ -205,8 +220,8 @@ function rowPlay(evt, row) {
   openMedia(row.dataset.stream, row.dataset.title, 'video');
 }
 
-function playAll() {
-  playlist = buildPlaylist();
+async function playAll() {
+  playlist = await fetchPlaylist();
   playlistIndex = 0;
   if (playlist.length > 0) openMedia(playlist[0].stream, playlist[0].title, 'video');
 }

@@ -9,7 +9,7 @@ func baseHref(basePath string) string {
 
 templ Layout(title string, basePath string, siteName string) {
 	<!DOCTYPE html>
-	<html lang="ru">
+	<html lang="ru" data-base-path={ basePath }>
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>

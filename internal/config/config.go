@@ -57,6 +57,9 @@ type Config struct {
 	// Извлечение аудио
 	FfmpegBinary   string `long:"ffmpeg-binary" env:"FFMPEG_BINARY" default:"ffmpeg"`
 	AudioOutputDir string `long:"audio-output-dir" env:"AUDIO_OUTPUT_DIR" default:""`
+
+	// Медиатека
+	LibPageSize int `long:"lib-page-size" env:"LIB_PAGE_SIZE" default:"200"`
 }
 
 // LinkBase возвращает корень для построения публичных ссылок: BASE_URL + BASE_PATH.

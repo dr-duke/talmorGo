@@ -343,7 +343,33 @@ func RuntimeSettingsSection(basePath string, rtSettings map[string]string, rtDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" min=\"30\"> <span class=\"settings-hint\">Секунды; по умолчанию 300</span></div></div><div class=\"settings-actions\"><button type=\"submit\" class=\"btn btn-primary btn-sm\"><span class=\"mi\">save</span>Сохранить</button></div></form></section>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" min=\"30\"> <span class=\"settings-hint\">Секунды; по умолчанию 300</span></div><span class=\"runtime-label\">Размер страницы медиатеки</span><div class=\"runtime-field\"><input id=\"rs-page-size\" type=\"number\" name=\"lib_page_size\" class=\"runtime-input runtime-narrow\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var19 string
+		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(rtSettings["lib_page_size"])
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/settings.templ`, Line: 202, Col: 41}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" placeholder=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var20 string
+		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(rtDefaults["lib_page_size"])
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/settings.templ`, Line: 203, Col: 47}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" min=\"10\"> <span class=\"settings-hint\">Строк на странице; по умолчанию 200</span></div></div><div class=\"settings-actions\"><button type=\"submit\" class=\"btn btn-primary btn-sm\"><span class=\"mi\">save</span>Сохранить</button></div></form></section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

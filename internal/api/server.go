@@ -71,10 +71,11 @@ func New(
 		templ.Handler(templates.Index(basePath, siteName, cols)).ServeHTTP(w, r)
 	})
 
-	// Медиатека: сайдбар, items, теги.
+	// Медиатека: сайдбар, items, теги, плейлист.
 	mux.HandleFunc("GET /library/sidebar", mh.LibrarySidebar)
 	mux.HandleFunc("GET /library/items", mh.LibraryItems)
 	mux.HandleFunc("GET /library/tags", mh.TagsFragment)
+	mux.HandleFunc("GET /library/playlist", mh.PlaylistItems)
 
 	// Items: стриминг, удаление, переименование, ссылки, аудио.
 	mux.HandleFunc("GET /items/{id}/stream", mh.Stream)

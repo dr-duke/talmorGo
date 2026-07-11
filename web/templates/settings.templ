@@ -192,6 +192,19 @@ templ RuntimeSettingsSection(basePath string, rtSettings map[string]string, rtDe
 					/>
 					<span class="settings-hint">Секунды; по умолчанию 300</span>
 				</div>
+				<span class="runtime-label">Размер страницы медиатеки</span>
+				<div class="runtime-field">
+					<input
+						id="rs-page-size"
+						type="number"
+						name="lib_page_size"
+						class="runtime-input runtime-narrow"
+						value={ rtSettings["lib_page_size"] }
+						placeholder={ rtDefaults["lib_page_size"] }
+						min="10"
+					/>
+					<span class="settings-hint">Строк на странице; по умолчанию 200</span>
+				</div>
 			</div>
 			<div class="settings-actions">
 				<button type="submit" class="btn btn-primary btn-sm">

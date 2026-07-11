@@ -50,8 +50,10 @@ type JobRepo interface {
 	List(ctx context.Context, f JobFilter) ([]*model.Job, error)
 	// ListMedia возвращает объединённое представление заданий + items + тегов.
 	ListMedia(ctx context.Context) ([]*model.MediaItem, error)
-	// FilterMedia — серверная фильтрация: текст + kind + AND-теги.
+	// FilterMedia — серверная фильтрация: текст + kind + AND-теги. Уважает f.Limit.
 	FilterMedia(ctx context.Context, f model.MediaFilter) ([]*model.MediaItem, error)
+	// CountMedia — полный счётчик без учёта Limit (для отображения «X из N»).
+	CountMedia(ctx context.Context, f model.MediaFilter) (int, error)
 	// SearchMedia ищет по имени файла, URL, домену и тегам (LIKE, для Telegram).
 	SearchMedia(ctx context.Context, query string) ([]*model.MediaItem, error)
 	// LastMedia возвращает последние n доступных элементов (для Telegram-уведомлений).
@@ -83,6 +85,9 @@ type TagRepo interface {
 	Upsert(ctx context.Context, name string) (*model.Tag, error)
 	ListAll(ctx context.Context) ([]*model.Tag, error)
 	ListWithCount(ctx context.Context) ([]*model.TagWithCount, error)
+	// ListWithCountFiltered возвращает теги с количеством заданий, соответствующих фильтру.
+	// При пустом фильтре эквивалентен ListWithCount.
+	ListWithCountFiltered(ctx context.Context, f model.MediaFilter) ([]*model.TagWithCount, error)
 	AddToJob(ctx context.Context, jobID, tagID string) error
 	BulkAddToJobs(ctx context.Context, tagID string, jobIDs []string) error
 	RemoveFromJob(ctx context.Context, jobID, tagName string) error

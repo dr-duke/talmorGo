@@ -161,7 +161,7 @@ func (r *sqliteJobRepo) SearchMedia(ctx context.Context, query string) ([]*model
 
 // FilterMedia — серверная фильтрация: текст + kind + AND-теги.
 func (r *sqliteJobRepo) FilterMedia(ctx context.Context, f model.MediaFilter) ([]*model.MediaItem, error) {
-	if f.Query == "" && f.Kind == "" && len(f.Tags) == 0 {
+	if f.Query == "" && f.Kind == "" && len(f.Tags) == 0 && f.Limit == 0 {
 		return r.ListMedia(ctx)
 	}
 
@@ -225,8 +225,70 @@ func (r *sqliteJobRepo) FilterMedia(ctx context.Context, f model.MediaFilter) ([
 
 		ORDER BY sort_ts DESC
 	`
+	if f.Limit > 0 {
+		q += fmt.Sprintf("LIMIT %d\n", f.Limit)
+	}
 	allArgs := append(fileArgs, jobArgs...)
 	return r.runMediaQuery(ctx, q, allArgs...)
+}
+
+// CountMedia возвращает полное число строк, которые вернул бы FilterMedia без Limit.
+func (r *sqliteJobRepo) CountMedia(ctx context.Context, f model.MediaFilter) (int, error) {
+	var fileConds []string
+	var fileArgs []any
+	var jobConds []string
+	var jobArgs []any
+
+	if f.Query != "" {
+		like := "%" + f.Query + "%"
+		fileConds = append(fileConds, "(i.name LIKE ? OR j.url LIKE ? OR j.title LIKE ?)")
+		fileArgs = append(fileArgs, like, like, like)
+		jobConds = append(jobConds, "(j.url LIKE ? OR j.title LIKE ?)")
+		jobArgs = append(jobArgs, like, like)
+	}
+	if f.Kind != "" {
+		fileConds = append(fileConds, "i.kind=?")
+		fileArgs = append(fileArgs, f.Kind)
+	}
+	for _, tag := range f.Tags {
+		sub := `j.id IN (SELECT jt.job_id FROM job_tags jt JOIN tags t ON t.id=jt.tag_id WHERE t.name=?)`
+		fileConds = append(fileConds, sub)
+		fileArgs = append(fileArgs, tag)
+		jobConds = append(jobConds, sub)
+		jobArgs = append(jobArgs, tag)
+	}
+
+	fileWhere := " WHERE j.hidden=0"
+	if len(fileConds) > 0 {
+		fileWhere += " AND " + strings.Join(fileConds, " AND ")
+	}
+	jobAnd := ""
+	if len(jobConds) > 0 {
+		jobAnd = " AND " + strings.Join(jobConds, " AND ")
+	}
+
+	pendingPart := ""
+	if f.Kind == "" {
+		pendingPart = `
+			UNION ALL
+			SELECT j.id AS id FROM jobs j
+			LEFT JOIN items i ON i.id = NULL
+			WHERE j.hidden = 0
+			  AND j.status IN ('checking','pending','running','retrying','failed','cancelled')
+			  AND NOT EXISTS (SELECT 1 FROM items WHERE job_id = j.id)
+			` + jobAnd
+	}
+
+	countQ := `SELECT COUNT(*) FROM (
+		SELECT i.id AS id FROM items i
+		JOIN jobs j ON j.id = i.job_id
+		` + fileWhere + `
+		` + pendingPart + `
+	)`
+	allArgs := append(fileArgs, jobArgs...)
+	var n int
+	err := r.db.QueryRowContext(ctx, countQ, allArgs...).Scan(&n)
+	return n, err
 }
 
 // LastMedia возвращает последние n доступных элементов.

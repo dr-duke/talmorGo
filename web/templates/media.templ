@@ -8,7 +8,8 @@ import (
 )
 
 // ItemList — HTMX-фрагмент: список медиаэлементов.
-templ ItemList(items []*model.MediaItem, tagCounts []*model.TagWithCount, f model.MediaFilter) {
+// total — полное количество совпадений в БД (без LIMIT); если == len(items), подпись не нужна.
+templ ItemList(items []*model.MediaItem, total int, f model.MediaFilter) {
 	<div
 		id="media-inner"
 		hx-get="library/items"
@@ -27,16 +28,29 @@ templ ItemList(items []*model.MediaItem, tagCounts []*model.TagWithCount, f mode
 					@mediaRow(item)
 				}
 			</div>
+			if total > len(items) {
+				<div class="page-footer">
+					Показано { strconv.Itoa(len(items)) } из { strconv.Itoa(total) }
+				</div>
+			}
 		}
 	</div>
 }
 
-templ TagCloud(tagCounts []*model.TagWithCount) {
-	<div id="tag-cloud" class="toolbar-chips" hx-get="library/tags" hx-trigger="tagsRefresh from:body, load once" hx-swap="outerHTML">
+// TagCloud — облако тегов. activeTag — текущий активный тег (подсвечивается).
+templ TagCloud(tagCounts []*model.TagWithCount, activeTag string) {
+	<div
+		id="tag-cloud"
+		class="toolbar-chips"
+		hx-get="library/tags"
+		hx-trigger="tagsRefresh from:body"
+		hx-swap="outerHTML"
+		hx-include="#filter-form"
+	>
 		for i, t := range tagCounts {
 			if t.IsCollection {
 				<button
-					class={ "chip", "coll", templ.KV("tag-extra", i >= 5) }
+					class={ "chip", "coll", templ.KV("tag-extra", i >= 5), templ.KV("active", t.Name == activeTag) }
 					data-tag={ t.Name }
 					onclick="toggleTag(this)"
 					title={ "Коллекция: " + t.Name }
@@ -46,7 +60,7 @@ templ TagCloud(tagCounts []*model.TagWithCount) {
 				</button>
 			} else {
 				<button
-					class={ "chip", templ.KV("tag-extra", i >= 5) }
+					class={ "chip", templ.KV("tag-extra", i >= 5), templ.KV("active", t.Name == activeTag) }
 					data-tag={ t.Name }
 					onclick="toggleTag(this)"
 				>
