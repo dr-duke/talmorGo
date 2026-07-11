@@ -100,6 +100,13 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 									hx-swap="outerHTML"
 								></div>
 							</div>
+							<button
+								class="icon-btn"
+								onclick="selectAllVisible()"
+								title="Выбрать все отображаемые"
+							>
+								<span class="mi">checklist</span>
+							</button>
 						</div>
 
 						<div id="play-all-bar" class="play-all-bar">

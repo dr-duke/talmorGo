@@ -611,6 +611,25 @@ function clearSelection() {
   updateActionBar();
 }
 
+function selectAllVisible() {
+  document.querySelectorAll('#media-inner .row-checkbox:not(:checked)').forEach(cb => {
+    cb.checked = true;
+    const row   = cb.closest('.media-row');
+    const jobId = cb.value;
+    selectedJobs.add(jobId);
+    selectedItems.set(jobId, {
+      itemId: row.dataset.itemId    || '',
+      kind:   row.dataset.kind      || '',
+      title:  row.dataset.metaTitle  || '',
+      artist: row.dataset.metaArtist || '',
+      album:  row.dataset.metaAlbum  || '',
+      year:   row.dataset.metaYear   || '',
+      genre:  row.dataset.metaGenre  || '',
+    });
+  });
+  updateActionBar();
+}
+
 /* ── Audio meta dialog ── */
 let _metaTarget = null; // { itemId, title, artist, album, year, genre } для пункта из меню строки
 
