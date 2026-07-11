@@ -137,6 +137,18 @@ function toggleTag(btn) {
   if (inner) htmx.trigger(inner, 'mediaRefresh');
 }
 
+// Фильтрует по тегу при клике на tag-chip в строке медиатеки.
+// Предпочитает делегировать в toggleTag через chip облака тегов (синхронизирует active-состояние).
+function filterByTag(tagName) {
+  const cloudChip = document.querySelector(`#tag-cloud .chip[data-tag="${CSS.escape(tagName)}"]`);
+  if (cloudChip) {
+    if (filter.tag !== tagName) cloudChip.click();
+  } else {
+    filter.tag = filter.tag === tagName ? '' : tagName;
+    applyFilter();
+  }
+}
+
 function expandTags() {
   const cloud = document.getElementById('tag-cloud');
   if (cloud) cloud.classList.add('tag-cloud-expanded');

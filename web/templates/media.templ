@@ -145,7 +145,11 @@ templ mediaRow(item *model.MediaItem) {
 						title="Статус"
 					>{ statusLabel(item.EffectiveStatus()) }</button>
 					for _, tag := range item.Tags {
-						<span class="tag-chip">
+						<span
+							class="tag-chip"
+							data-tag={ tag }
+							onclick="event.stopPropagation();filterByTag(this.dataset.tag)"
+						>
 							{ tag }
 							<button
 								class="chip-remove"
