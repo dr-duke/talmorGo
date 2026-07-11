@@ -114,3 +114,38 @@ func (r *sqliteTagRepo) BulkAddToJobs(ctx context.Context, tagID string, jobIDs 
 		args...)
 	return err
 }
+
+func (r *sqliteTagRepo) PruneOrphans(ctx context.Context) (nJobTags, nTags, nCollections int, err error) {
+	exec := func(q string) (int, error) {
+		res, e := r.db.ExecContext(ctx, q)
+		if e != nil {
+			return 0, e
+		}
+		n, _ := res.RowsAffected()
+		return int(n), nil
+	}
+
+	// 1. job_tags → несуществующие jobs
+	if nJobTags, err = exec(`DELETE FROM job_tags WHERE job_id NOT IN (SELECT id FROM jobs)`); err != nil {
+		return
+	}
+	// 2. plain теги без привязанных заданий
+	if nTags, err = exec(`DELETE FROM tags WHERE kind='plain' AND id NOT IN (SELECT DISTINCT tag_id FROM job_tags)`); err != nil {
+		return
+	}
+	// 3. коллекции без активных заданий
+	if nCollections, err = exec(`
+		DELETE FROM collections WHERE id NOT IN (
+			SELECT DISTINCT c.id FROM collections c
+			JOIN tags t ON t.name = c.name
+			JOIN job_tags jt ON jt.tag_id = t.id
+			JOIN jobs j ON j.id = jt.job_id
+		)`); err != nil {
+		return
+	}
+	// 4. collection-теги без соответствующей записи в collections
+	n, e := exec(`DELETE FROM tags WHERE kind='collection' AND name NOT IN (SELECT name FROM collections)`)
+	nTags += n
+	err = e
+	return
+}

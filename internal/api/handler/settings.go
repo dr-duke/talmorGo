@@ -20,6 +20,7 @@ type SettingsHandler struct {
 	Settings repo.SettingsRepo
 	Jobs     repo.JobRepo
 	Items    repo.ItemRepo
+	Tags     repo.TagRepo
 	Storage  *storage.Storage
 	Cfg      *config.Config
 	SiteName string
@@ -209,4 +210,46 @@ func parseCookiesByDomain(raw string) map[string][]string {
 		out[domain] = append(out[domain], line)
 	}
 	return out
+}
+
+// Reindex очищает осиротевшие теги/коллекции и проверяет доступность файлов на диске.
+func (h *SettingsHandler) Reindex(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	nJobTags, nTags, nCollections, err := h.Tags.PruneOrphans(ctx)
+	if err != nil {
+		slog.Error("settings: reindex prune orphans", "err", err)
+	}
+
+	items, err := h.Items.ListAll(ctx)
+	if err != nil {
+		slog.Error("settings: reindex list items", "err", err)
+	}
+	lost, found := 0, 0
+	for _, item := range items {
+		if item.IsDeleted() {
+			continue
+		}
+		_, statErr := os.Stat(item.Path)
+		missing := os.IsNotExist(statErr)
+		if missing && !item.IsLost() {
+			if markErr := h.Items.MarkLost(ctx, item.ID); markErr == nil {
+				lost++
+			}
+		} else if !missing && item.IsLost() {
+			if markErr := h.Items.MarkFound(ctx, item.ID); markErr == nil {
+				found++
+			}
+		}
+	}
+
+	slog.Info("settings: reindex done",
+		"job_tags_pruned", nJobTags, "tags_pruned", nTags, "collections_pruned", nCollections,
+		"files_lost", lost, "files_found", found)
+
+	msg := fmt.Sprintf(
+		"Привязок удалено: %d, тегов: %d, коллекций: %d. Файлов: потеряно %d, восстановлено %d.",
+		nJobTags, nTags, nCollections, lost, found)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<p class="cleanup-result">%s</p>`, msg)
 }

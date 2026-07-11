@@ -52,7 +52,7 @@ func New(
 	}
 	ch := &handler.CollectionHandler{Collections: collections}
 	lh := &handler.LinkHandler{Tokens: tokens, Items: items}
-	sh := &handler.SettingsHandler{Cookies: cookies, Settings: settings, Jobs: jobs, Items: items, Storage: store, Cfg: cfg, SiteName: siteName}
+	sh := &handler.SettingsHandler{Cookies: cookies, Settings: settings, Jobs: jobs, Items: items, Tags: tags, Storage: store, Cfg: cfg, SiteName: siteName}
 
 	// Статика.
 	staticSub, _ := fs.Sub(web.StaticFiles, "static")
@@ -113,6 +113,7 @@ func New(
 	mux.HandleFunc("POST /settings/cookies/import", sh.Import)
 	mux.HandleFunc("DELETE /settings/cookies/{domain}", sh.DeleteDomain)
 	mux.HandleFunc("POST /settings/cleanup", sh.Cleanup)
+	mux.HandleFunc("POST /settings/reindex", sh.Reindex)
 	mux.HandleFunc("POST /settings/runtime", sh.SaveRuntimeSettings)
 
 	// SSE.

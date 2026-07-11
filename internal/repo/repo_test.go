@@ -233,3 +233,58 @@ func TestTagRepo_PruneOnRemove(t *testing.T) {
 		}
 	}
 }
+
+func TestTagRepo_PruneOrphans(t *testing.T) {
+	database := openTestDB(t)
+	jobRepo := repo.NewJobRepo(database)
+	tagRepo := repo.NewTagRepo(database)
+	ctx := context.Background()
+
+	// Создаём job и привязываем тег
+	job := &model.Job{URL: "https://example.com/v", Status: model.JobDone, Source: "web"}
+	if err := jobRepo.Create(ctx, job); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	tag, err := tagRepo.Upsert(ctx, "keep-tag")
+	if err != nil {
+		t.Fatalf("upsert tag: %v", err)
+	}
+	if err := tagRepo.AddToJob(ctx, job.ID, tag.ID); err != nil {
+		t.Fatalf("add tag: %v", err)
+	}
+
+	// Вручную вставляем оборванную job_tags запись (job_id не существует)
+	database.ExecContext(ctx, `INSERT INTO job_tags (job_id, tag_id) VALUES ('ghost-job-id', ?)`, tag.ID)
+
+	// Вручную вставляем сиротский тег (kind=plain, нет job_tags)
+	database.ExecContext(ctx, `INSERT INTO tags (id, name, kind) VALUES ('orphan-tag-id', 'orphan-tag', 'plain')`)
+
+	nJobTags, nTags, nCollections, err := tagRepo.PruneOrphans(ctx)
+	if err != nil {
+		t.Fatalf("PruneOrphans: %v", err)
+	}
+	if nJobTags != 1 {
+		t.Errorf("expected 1 orphaned job_tag pruned, got %d", nJobTags)
+	}
+	if nTags != 1 {
+		t.Errorf("expected 1 orphaned tag pruned, got %d", nTags)
+	}
+	if nCollections != 0 {
+		t.Errorf("expected 0 collections pruned, got %d", nCollections)
+	}
+
+	// keep-tag должен остаться
+	all, _ := tagRepo.ListAll(ctx)
+	found := false
+	for _, tg := range all {
+		if tg.Name == "keep-tag" {
+			found = true
+		}
+		if tg.Name == "orphan-tag" {
+			t.Error("orphan-tag should have been pruned")
+		}
+	}
+	if !found {
+		t.Error("keep-tag should still exist after PruneOrphans")
+	}
+}

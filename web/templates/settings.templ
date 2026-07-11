@@ -45,6 +45,24 @@ templ SettingsPage(basePath string, siteName string, records []*model.CookieReco
 			</section>
 			@CookieDomainList(records)
 			<section class="settings-section">
+				<h2 class="settings-h2">Тэги и коллекции</h2>
+				<p class="settings-hint">
+					Удаляет оборванные привязки заданий, пустые тэги и пустые коллекции.
+					Проверяет наличие каждого файла на диске и обновляет статус доступности.
+				</p>
+				<div class="settings-actions">
+					<button
+						class="btn btn-secondary btn-sm"
+						hx-post="settings/reindex"
+						hx-target="#reindex-result"
+						hx-swap="innerHTML"
+					>
+						<span class="mi">manage_search</span>Пересчитать
+					</button>
+				</div>
+				<div id="reindex-result" class="cleanup-result"></div>
+			</section>
+			<section class="settings-section">
 				<h2 class="settings-h2">Очистка</h2>
 				<p class="settings-hint">
 					Безвозвратно удаляет из базы данных и с диска все неудачные загрузки, скрытые задания
