@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"time"
 
 	"github.com/dr-duke/talmorGo/internal/model"
 )
@@ -19,8 +20,13 @@ type ItemRepo interface {
 	// DeleteAllByJobID удаляет все записи items задания из БД (при redownload).
 	DeleteAllByJobID(ctx context.Context, jobID string) error
 	ListDeleted(ctx context.Context) ([]*model.DeletedItem, error)
-	// AllPaths возвращает множество всех известных путей для сверки при сканировании.
-	AllPaths(ctx context.Context) (map[string]struct{}, error)
+	// KnownPaths возвращает известные пути и признак доступности элемента.
+	// Сканеру важно различать их: файл, вернувшийся на место удалённого,
+	// нужно не пропустить, а восстановить.
+	KnownPaths(ctx context.Context) (map[string]bool, error)
+	// RestoreByPath снимает пометки об удалении и пропаже с элемента по пути.
+	// Возвращает false, если такого элемента нет.
+	RestoreByPath(ctx context.Context, path string, size int64) (bool, error)
 	// PathsForCleanup возвращает пути элементов failed/hidden заданий (для удаления с диска).
 	PathsForCleanup(ctx context.Context) ([]string, error)
 	// PruneLost удаляет из БД записи, помеченные как потерянные.
@@ -29,7 +35,6 @@ type ItemRepo interface {
 	SoftDelete(ctx context.Context, id string) error
 	MarkLost(ctx context.Context, id string) error
 	MarkFound(ctx context.Context, id string) error
-	UpdateMeta(ctx context.Context, id string, meta model.AudioMeta) error
 	// BulkUpdateMetaFields обновляет только указанные поля (title/artist/album/year/genre)
 	// для набора элементов. Ключи, отсутствующие в fields, не затрагиваются.
 	BulkUpdateMetaFields(ctx context.Context, ids []string, fields map[string]string) error
@@ -48,13 +53,13 @@ type JobRepo interface {
 	Create(ctx context.Context, job *model.Job) error
 	GetByID(ctx context.Context, id string) (*model.Job, error)
 	List(ctx context.Context, f JobFilter) ([]*model.Job, error)
-	// ListMedia возвращает объединённое представление заданий + items + тегов.
-	ListMedia(ctx context.Context) ([]*model.MediaItem, error)
-	// FilterMedia — серверная фильтрация: текст + kind + AND-теги. Уважает f.Limit.
+	// ListIDsByStatus возвращает id заданий в указанных статусах (для массовой отмены).
+	ListIDsByStatus(ctx context.Context, statuses ...model.JobStatus) ([]string, error)
+	// FilterMedia — серверная фильтрация медиатеки: текст + kind + AND-теги + пагинация.
 	FilterMedia(ctx context.Context, f model.MediaFilter) ([]*model.MediaItem, error)
-	// CountMedia — полный счётчик без учёта Limit (для отображения «X из N»).
+	// CountMedia — полный счётчик без учёта Limit/Offset (для отображения «X из N»).
 	CountMedia(ctx context.Context, f model.MediaFilter) (int, error)
-	// SearchMedia ищет по имени файла, URL, домену и тегам (LIKE, для Telegram).
+	// SearchMedia ищет по имени файла, URL, заголовку и тегам (для Telegram).
 	SearchMedia(ctx context.Context, query string) ([]*model.MediaItem, error)
 	// LastMedia возвращает последние n доступных элементов (для Telegram-уведомлений).
 	LastMedia(ctx context.Context, n int) ([]*model.MediaItem, error)
@@ -64,6 +69,8 @@ type JobRepo interface {
 	CancelAll(ctx context.Context) (int64, error)
 	ConfirmSingle(ctx context.Context, id string) error
 	DeleteChecking(ctx context.Context, id string) error
+	// ListChecking возвращает задания, зависшие на проверке плейлиста после рестарта.
+	ListChecking(ctx context.Context) ([]*model.Job, error)
 	Hide(ctx context.Context, id string) error
 	Unhide(ctx context.Context, id string) error
 	Purge(ctx context.Context, id string) error
@@ -79,14 +86,15 @@ type JobRepo interface {
 type TokenRepo interface {
 	Upsert(ctx context.Context, itemID string) (*model.Token, error)
 	GetByToken(ctx context.Context, token string) (*model.Token, error)
+	// DeleteByItemID отзывает постоянную ссылку на элемент.
+	DeleteByItemID(ctx context.Context, itemID string) (bool, error)
 }
 
 type TagRepo interface {
 	Upsert(ctx context.Context, name string) (*model.Tag, error)
 	ListAll(ctx context.Context) ([]*model.Tag, error)
-	ListWithCount(ctx context.Context) ([]*model.TagWithCount, error)
 	// ListWithCountFiltered возвращает теги с количеством заданий, соответствующих фильтру.
-	// При пустом фильтре эквивалентен ListWithCount.
+	// Пустой фильтр даёт полное облако тегов.
 	ListWithCountFiltered(ctx context.Context, f model.MediaFilter) ([]*model.TagWithCount, error)
 	AddToJob(ctx context.Context, jobID, tagID string) error
 	BulkAddToJobs(ctx context.Context, tagID string, jobIDs []string) error
@@ -98,15 +106,19 @@ type TagRepo interface {
 
 type OperationRepo interface {
 	Create(ctx context.Context, op *model.Operation) error
-	// ClaimNext атомарно переводит старейшую pending-операцию в running и возвращает её.
-	// Возвращает nil, nil если очередь пуста.
-	ClaimNext(ctx context.Context) (*model.Operation, error)
+	GetByID(ctx context.Context, id string) (*model.Operation, error)
+	// ClaimNext атомарно переводит старейшую pending-операцию указанных видов
+	// в running и возвращает её. Возвращает nil, nil если очередь пуста.
+	ClaimNext(ctx context.Context, kinds []string) (*model.Operation, error)
 	SetDone(ctx context.Context, id string) error
 	SetFailed(ctx context.Context, id, errMsg string) error
-	// List возвращает операции заданных видов (все статусы, кроме deleted).
-	// Пустой kinds — вернуть все.
+	// List возвращает операции заданных видов. Пустой kinds — вернуть все.
 	List(ctx context.Context, kinds []string) ([]*model.Operation, error)
 	Delete(ctx context.Context, id string) error
+	// ResetStale возвращает в очередь операции, оборванные рестартом.
+	ResetStale(ctx context.Context) (int, error)
+	// DeleteFinishedBefore удаляет завершённые операции старше указанного момента.
+	DeleteFinishedBefore(ctx context.Context, cutoff time.Time) (int, error)
 }
 
 type SettingsRepo interface {

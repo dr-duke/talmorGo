@@ -5,14 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/dr-duke/talmorGo/internal/db"
 )
 
 type sqliteSettingsRepo struct {
-	db *sql.DB
+	db *db.DB
 }
 
-func NewSettingsRepo(db *sql.DB) SettingsRepo {
-	return &sqliteSettingsRepo{db: db}
+func NewSettingsRepo(database *db.DB) SettingsRepo {
+	return &sqliteSettingsRepo{db: database}
 }
 
 func (r *sqliteSettingsRepo) Get(ctx context.Context, key string) (string, error) {

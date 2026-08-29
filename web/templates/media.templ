@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+	"github.com/dr-duke/talmorGo/internal/library"
 	"github.com/dr-duke/talmorGo/internal/model"
 )
 
-// ItemList — HTMX-фрагмент: список медиаэлементов.
-// total — полное количество совпадений в БД (без LIMIT); если == len(items), подпись не нужна.
-templ ItemList(items []*model.MediaItem, total int, f model.MediaFilter) {
+// ItemList — HTMX-фрагмент: список медиаэлементов первой страницы.
+templ ItemList(page *library.Page) {
 	<div
 		id="media-inner"
 		hx-get="library/items"
@@ -17,25 +17,43 @@ templ ItemList(items []*model.MediaItem, total int, f model.MediaFilter) {
 		hx-swap="outerHTML"
 		hx-include="#filter-form"
 	>
-		if len(items) == 0 {
+		if len(page.Items) == 0 {
 			<div class="empty-state">
 				<span class="mi">video_library</span>
 				<p>Медиатека пуста</p>
 			</div>
 		} else {
 			<div class="media-list">
-				for _, item := range items {
-					@mediaRow(item)
-				}
+				@ItemRows(page)
 			</div>
-			if total > len(items) {
-				<div class="page-footer">
-					Показано { strconv.Itoa(len(items)) } из { strconv.Itoa(total) }
-				</div>
-			}
 		}
 	</div>
 }
+
+// ItemRows — строки одной страницы и кнопка догрузки следующей.
+// Кнопка живёт внутри .media-list и заменяет себя следующей порцией строк.
+templ ItemRows(page *library.Page) {
+	for _, item := range page.Items {
+		@mediaRow(item)
+	}
+	if hasMore(page) {
+		<button
+			class="page-more"
+			hx-get={ fmt.Sprintf("library/items?rows=1&offset=%d", shown(page)) }
+			hx-trigger="click"
+			hx-swap="outerHTML"
+			hx-include="#filter-form"
+		>
+			<span class="mi">expand_more</span>
+			Показать ещё · { strconv.Itoa(shown(page)) } из { strconv.Itoa(page.Total) }
+		</button>
+	}
+}
+
+// shown — сколько строк уже отдано клиенту с учётом предыдущих страниц.
+func shown(p *library.Page) int { return p.Filter.Offset + len(p.Items) }
+
+func hasMore(p *library.Page) bool { return p.Total > shown(p) }
 
 // TagCloud — облако тегов. activeTag — текущий активный тег (подсвечивается).
 templ TagCloud(tagCounts []*model.TagWithCount, activeTag string) {
@@ -245,6 +263,12 @@ templ mediaRow(item *model.MediaItem) {
 						<button
 							class="row-menu-item"
 							data-item-id={ item.Item.ID }
+							onclick="revokeLink(this.dataset.itemId)"
+							title="Прежний адрес перестанет работать"
+						><span class="mi">link_off</span>Отозвать ссылку</button>
+						<button
+							class="row-menu-item"
+							data-item-id={ item.Item.ID }
 							data-name={ item.Item.Name }
 							onclick="renameFile(this.dataset.itemId, this.dataset.name)"
 							title="Переименовать"
@@ -325,14 +349,6 @@ func rowClickExpr(it *model.MediaItem) templ.ComponentScript {
 		return templ.ComponentScript{Call: "rowActivate(event, this.closest('.media-row'))"}
 	}
 	return templ.ComponentScript{}
-}
-
-func joinTagsWithStatus(status string, tags []string) string {
-	out := status
-	for _, t := range tags {
-		out += "," + t
-	}
-	return out
 }
 
 func rowAvailable(it *model.MediaItem) bool {

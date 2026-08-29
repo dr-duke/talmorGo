@@ -109,13 +109,6 @@ templ Layout(title string, basePath string, siteName string) {
 				}
 				.chip-remove:hover { opacity: 1; }
 
-				/* ── Status colours ── */
-				.s-checking,.s-pending,.s-running { background: var(--accent-dim); color: var(--accent); }
-				.s-done,.s-imported                { background: var(--ok-dim);     color: var(--ok-fg); }
-				.s-retrying,.s-missing             { background: var(--warn-dim);   color: var(--warn-fg); }
-				.s-failed,.s-cancelled,.s-deleted  { background: var(--danger-dim); color: var(--danger); }
-				.s-hidden                          { background: var(--surface-2);  color: var(--text-2); }
-
 				/* ── Search ── */
 				.search-input {
 					background: var(--surface-2); border: 1px solid var(--border);
@@ -177,6 +170,48 @@ templ Layout(title string, basePath string, siteName string) {
 				}
 				.sidebar-divider { height: 1px; background: var(--border-soft); margin: .35rem 0; }
 				.sidebar-count { font-size: .7rem; opacity: .6; margin-left: auto; }
+
+				/* ── Строка коллекции с меню действий ── */
+				.sidebar-coll-row { display: flex; align-items: center; }
+				.sidebar-coll-row .sidebar-nav-item { flex: 1; min-width: 0; }
+				.sidebar-coll-menu {
+					width: 26px; height: 26px; flex-shrink: 0;
+					opacity: 0; transition: opacity .12s;
+				}
+				.sidebar-coll-row:hover .sidebar-coll-menu,
+				.sidebar-coll-menu:focus-visible { opacity: 1; }
+				.sidebar-coll-row .row-menu { left: .5rem; right: auto; }
+
+				/* ── Догрузка страницы медиатеки ── */
+				.page-more {
+					display: flex; align-items: center; justify-content: center; gap: .4rem;
+					width: 100%; padding: .6rem; margin-top: .2rem;
+					background: var(--surface); border: 1px dashed var(--border);
+					border-radius: var(--radius); cursor: pointer;
+					color: var(--text-2); font-size: .8rem; font-family: inherit;
+				}
+				.page-more:hover { background: var(--surface-2); color: var(--text); }
+				.page-more.htmx-request { opacity: .5; pointer-events: none; }
+
+				/* ── Страница входа ── */
+				.login-wrap {
+					display: flex; align-items: center; justify-content: center;
+					min-height: 100vh; padding: 1rem;
+				}
+				.login-card {
+					display: flex; flex-direction: column; align-items: center; gap: .75rem;
+					background: var(--surface); border: 1px solid var(--border);
+					border-radius: 14px; padding: 2rem; width: min(100%, 340px);
+				}
+				.login-title { font-size: 1.1rem; font-weight: 700; }
+				.login-hint { font-size: .8rem; color: var(--text-2); }
+				.login-input {
+					width: 100%; background: var(--surface-2); border: 1px solid var(--border);
+					border-radius: var(--radius-sm); color: var(--text);
+					font-size: .875rem; padding: .5rem .75rem; outline: none;
+				}
+				.login-input:focus { border-color: var(--accent); }
+				.login-error { font-size: .8rem; color: var(--danger); }
 
 				/* ── Main content area ── */
 				.main-content { flex: 1; min-width: 0; overflow-y: auto; }

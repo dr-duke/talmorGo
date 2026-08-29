@@ -10,7 +10,7 @@ templ QueueItems(jobs []*model.Job, operations []*model.Operation) {
 	<div
 		id="queue-inner"
 		hx-get="queue/items"
-		hx-trigger="mediaRefresh from:body"
+		hx-trigger="queueRefresh from:body"
 		hx-swap="outerHTML"
 	>
 		if len(operations) == 0 && len(jobs) == 0 {

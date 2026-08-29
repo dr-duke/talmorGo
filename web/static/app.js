@@ -21,6 +21,42 @@ document.body.addEventListener('showToast', (e) => {
   showToast(e.detail?.value || '');
 });
 
+/* ── API ──
+   Запросы из JS идут через один вход: ответ может нести HX-Trigger, и тогда
+   события (mediaRefresh, tagsRefresh, collectionsRefresh…) диспетчеризуются так
+   же, как для запросов самого HTMX. Раньше JS обновлял только медиасписок и,
+   например, облако тегов оставалось устаревшим до перезагрузки страницы. */
+async function api(path, opts = {}) {
+  const resp = await fetch(base() + path, opts);
+  const trigger = resp.headers.get('HX-Trigger');
+  if (trigger) {
+    let events;
+    try {
+      events = JSON.parse(trigger);
+    } catch {
+      events = { [trigger]: true };
+    }
+    for (const [name, detail] of Object.entries(events)) {
+      if (name === 'showToast') showToast(String(detail));
+      else htmx.trigger(document.body, name);
+    }
+  }
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(text || resp.statusText);
+  }
+  return resp;
+}
+
+/* jsonBody — тело JSON-запроса с нужными заголовками. */
+function jsonBody(method, payload) {
+  return {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  };
+}
+
 /* ── Section switching (lib / queue) ── */
 function _showLib() {
   const lib = document.getElementById('lib-section');
@@ -211,13 +247,6 @@ function rowActivate(evt, row) {
   if (evt) evt.stopPropagation();
   if (!row || !row.dataset.stream) return;
   openMedia(row.dataset.stream, row.dataset.title, row.dataset.kind || 'video');
-}
-
-/* kept for legacy calls */
-function rowPlay(evt, row) {
-  if (evt) evt.stopPropagation();
-  if (!row || !row.dataset.stream) return;
-  openMedia(row.dataset.stream, row.dataset.title, 'video');
 }
 
 async function playAll() {
@@ -517,52 +546,63 @@ document.addEventListener('click', (e) => {
 });
 
 /* ── Copy helpers ── */
-function copyLink(itemId) {
-  fetch(base() + 'items/' + itemId + '/link', { method: 'POST' })
-    .then(r => r.json())
-    .then(d => { navigator.clipboard.writeText(d.url); showToast('Ссылка скопирована'); })
-    .catch(() => showToast('Ошибка получения ссылки'));
+async function copyLink(itemId) {
+  try {
+    const resp = await api('items/' + itemId + '/link', { method: 'POST' });
+    const d = await resp.json();
+    await navigator.clipboard.writeText(d.url);
+    showToast('Ссылка скопирована');
+  } catch {
+    showToast('Ошибка получения ссылки');
+  }
 }
 
 function copyURL(url) {
   navigator.clipboard.writeText(url).then(() => showToast('URL скопирован'));
 }
 
+/* Отзыв постоянной ссылки: прежний адрес перестаёт работать. */
+async function revokeLink(itemId) {
+  if (!window.confirm('Отозвать постоянную ссылку? Прежний адрес перестанет работать.')) return;
+  try {
+    await api('items/' + itemId + '/link', { method: 'DELETE' });
+    showToast('Ссылка отозвана');
+  } catch (e) {
+    showToast('Ошибка: ' + e.message);
+  }
+}
+
 /* ── Rename ── */
-function renameFile(itemId, currentName) {
+async function renameFile(itemId, currentName) {
   const newName = window.prompt('Новое имя файла:', currentName);
   if (!newName || newName === currentName) return;
-  fetch(base() + 'items/' + itemId, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: newName })
-  }).then(r => {
-    if (r.ok) { showToast('Переименовано'); const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); }
-    else r.text().then(t => showToast('Ошибка: ' + t));
-  });
+  try {
+    await api('items/' + itemId, jsonBody('PATCH', { name: newName }));
+    showToast('Переименовано');
+  } catch (e) {
+    showToast('Ошибка: ' + e.message);
+  }
 }
 
 /* ── Delete file ── */
-function deleteFile(itemId) {
-  fetch(base() + 'items/' + itemId, { method: 'DELETE' })
-    .then(r => {
-      if (r.ok) { showToast('Файл удалён'); const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); }
-      else r.text().then(t => showToast('Ошибка: ' + t));
-    });
+async function deleteFile(itemId) {
+  try {
+    await api('items/' + itemId, { method: 'DELETE' });
+    showToast('Файл удалён');
+  } catch (e) {
+    showToast('Ошибка: ' + e.message);
+  }
 }
 
 /* ── Add tag ── */
-function addTag(jobId) {
+async function addTag(jobId) {
   const name = window.prompt('Имя тега:');
   if (!name) return;
-  fetch(base() + 'jobs/' + jobId + '/tags', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name })
-  }).then(r => {
-    if (r.ok) { const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); }
-    else r.text().then(t => showToast('Ошибка: ' + t));
-  });
+  try {
+    await api('jobs/' + jobId + '/tags', jsonBody('POST', { name }));
+  } catch (e) {
+    showToast('Ошибка: ' + e.message);
+  }
 }
 
 /* ── Bulk selection ── */
@@ -696,45 +736,37 @@ async function applyMeta() {
   }
   if (!itemIds.length) { dlg?.close(); return; }
 
-  const r = await fetch(base() + 'items/meta-bulk', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ item_ids: itemIds, fields }),
-  });
-  dlg?.close();
-  _metaTarget = null;
-  if (r.ok) {
+  try {
+    await api('items/meta-bulk', jsonBody('POST', { item_ids: itemIds, fields }));
     clearSelection();
-    htmx.trigger(document.body, 'mediaRefresh');
     showToast('Теги обновлены');
-  } else {
-    r.text().then(t => showToast('Ошибка: ' + t));
+  } catch (e) {
+    showToast('Ошибка: ' + e.message);
+  } finally {
+    dlg?.close();
+    _metaTarget = null;
   }
 }
 
-function bulkTag() {
+async function bulkTag() {
   const name = window.prompt('Тег для всех выбранных:');
   if (!name || !selectedJobs.size) return;
-  fetch(base() + 'media/bulk-tag', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tag: name, job_ids: [...selectedJobs] })
-  }).then(r => {
-    if (r.ok) { clearSelection(); const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); }
-    else r.text().then(t => showToast('Ошибка: ' + t));
-  });
+  try {
+    await api('media/bulk-tag', jsonBody('POST', { tag: name, job_ids: [...selectedJobs] }));
+    clearSelection();
+  } catch (e) {
+    showToast('Ошибка: ' + e.message);
+  }
 }
 
-function bulkHide() {
+async function bulkHide() {
   if (!selectedJobs.size) return;
-  fetch(base() + 'media/bulk-hide', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ job_ids: [...selectedJobs] })
-  }).then(r => {
-    if (r.ok) { clearSelection(); const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); }
-    else r.text().then(t => showToast('Ошибка: ' + t));
-  });
+  try {
+    await api('media/bulk-hide', jsonBody('POST', { job_ids: [...selectedJobs] }));
+    clearSelection();
+  } catch (e) {
+    showToast('Ошибка: ' + e.message);
+  }
 }
 
 /* ── Collection dropdown (bulk) ── */
@@ -750,63 +782,97 @@ function renderCollDropdown(cols) {
   const dd = document.getElementById('coll-dropdown');
   if (!dd) return;
   const items = cols.map(c =>
-    `<button class="row-menu-item" onclick="addToCollection('${c.ID}')">${c.Name}</button>`
+    `<button class="row-menu-item" data-coll-id="${c.id}">${escapeHTML(c.name)}</button>`
   ).join('');
   const createBtn = `<div class="row-menu-divider"></div>
-    <button class="row-menu-item" onclick="createAndAddToCollection()">
+    <button class="row-menu-item" data-coll-create="1">
       <span class="mi">create_new_folder</span>Создать коллекцию…
     </button>`;
   dd.innerHTML = items + createBtn;
+
+  // Имена коллекций задаёт пользователь — обработчики вешаем кодом,
+  // а не подставляем имя внутрь строки onclick.
+  dd.querySelectorAll('[data-coll-id]').forEach(btn => {
+    btn.addEventListener('click', () => addToCollection(btn.dataset.collId));
+  });
+  dd.querySelector('[data-coll-create]')
+    ?.addEventListener('click', createAndAddToCollection);
 }
 
-function toggleCollDropdown() {
+/* escapeHTML — вставка пользовательского текста в innerHTML. */
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, ch => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+  ));
+}
+
+async function toggleCollDropdown() {
   const dd = document.getElementById('coll-dropdown');
   if (!dd) return;
   collDropOpen = !collDropOpen;
   dd.classList.toggle('hidden', !collDropOpen);
-  if (collDropOpen) {
-    dd.innerHTML = '<div style="padding:.5rem;color:var(--text-2);font-size:.8rem">Загрузка…</div>';
-    fetch(base() + 'collections')
-      .then(r => r.json())
-      .then(cols => renderCollDropdown(cols))
-      .catch(() => { dd.innerHTML = '<div style="padding:.5rem;color:var(--danger)">Ошибка</div>'; });
+  if (!collDropOpen) return;
+
+  dd.innerHTML = '<div style="padding:.5rem;color:var(--text-2);font-size:.8rem">Загрузка…</div>';
+  try {
+    const resp = await api('collections');
+    renderCollDropdown(await resp.json());
+  } catch {
+    dd.innerHTML = '<div style="padding:.5rem;color:var(--danger)">Ошибка</div>';
   }
 }
 
-function addToCollection(collId) {
+async function addToCollection(collId) {
   if (!selectedJobs.size) return;
   closeCollDropdown();
-  fetch(base() + 'collections/' + collId + '/jobs', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ job_ids: [...selectedJobs] })
-  }).then(r => {
-    if (r.ok) { clearSelection(); const mi = document.getElementById('media-inner'); if (mi) htmx.trigger(mi, 'mediaRefresh'); showToast('Добавлено в коллекцию'); }
-    else r.text().then(t => showToast('Ошибка: ' + t));
-  });
+  try {
+    await api('collections/' + collId + '/jobs', jsonBody('POST', { job_ids: [...selectedJobs] }));
+    clearSelection();
+    showToast('Добавлено в коллекцию');
+  } catch (e) {
+    showToast('Ошибка: ' + e.message);
+  }
 }
 
 async function createAndAddToCollection() {
   closeCollDropdown();
   const name = window.prompt('Название новой коллекции:');
   if (!name) return;
-  const r = await fetch(base() + 'collections', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name })
-  });
-  if (!r.ok) { showToast('Ошибка создания коллекции'); return; }
-  const col = await r.json();
-  addToCollection(col.ID);
+  try {
+    const resp = await api('collections', jsonBody('POST', { name }));
+    const col = await resp.json();
+    await addToCollection(col.id);
+  } catch {
+    showToast('Ошибка создания коллекции');
+  }
 }
 
-/* ── Status filter ── */
-function activateStatusFilter(status) {
-  filter.tag = status;
-  filter.kind = '';
-  const ft = document.getElementById('filter-tag');
-  if (ft) ft.value = status;
-  applyFilter();
+/* ── Управление коллекциями (меню в сайдбаре) ── */
+async function renameCollection(collId, currentName) {
+  const name = window.prompt('Новое название коллекции:', currentName);
+  if (!name || name === currentName) return;
+  try {
+    await api('collections/' + collId, jsonBody('PATCH', { name }));
+    showToast('Коллекция переименована');
+  } catch (e) {
+    showToast('Ошибка: ' + e.message);
+  }
+}
+
+async function deleteCollection(collId, name) {
+  if (!window.confirm(`Удалить коллекцию «${name}»? Видео останутся в медиатеке.`)) return;
+  try {
+    await api('collections/' + collId, { method: 'DELETE' });
+    // Коллекция могла быть активным фильтром — сбрасываем его.
+    if (filter.tag === name) {
+      filter.tag = '';
+      hidePlayAll();
+      applyFilter();
+    }
+    showToast('Коллекция удалена');
+  } catch (e) {
+    showToast('Ошибка: ' + e.message);
+  }
 }
 
 /* ── Collection sidebar refresh ── */

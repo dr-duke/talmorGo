@@ -27,18 +27,37 @@ templ SidebarNav(cols []*model.Collection) {
 			<div class="sidebar-divider"></div>
 			<span class="sidebar-section-label">Коллекции</span>
 			for _, c := range cols {
-				<button
-					class="sidebar-nav-item"
-					data-coll={ c.Name }
-					onclick="setColl(this,this.dataset.coll)"
-					title={ c.Name }
-				>
-					<span class="mi">folder</span>
-					<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{ c.Name }</span>
-					if c.ItemCount > 0 {
-						<span class="sidebar-count">{ itoa(c.ItemCount) }</span>
-					}
-				</button>
+				<div class="sidebar-coll-row row-menu-wrap">
+					<button
+						class="sidebar-nav-item"
+						data-coll={ c.Name }
+						onclick="setColl(this,this.dataset.coll)"
+						title={ c.Name }
+					>
+						<span class="mi">folder</span>
+						<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{ c.Name }</span>
+						if c.ItemCount > 0 {
+							<span class="sidebar-count">{ itoa(c.ItemCount) }</span>
+						}
+					</button>
+					<button class="icon-btn sidebar-coll-menu" title="Действия" onclick="toggleMenu(event, this)">
+						<span class="mi">more_vert</span>
+					</button>
+					<div class="row-menu">
+						<button
+							class="row-menu-item"
+							data-coll-id={ c.ID }
+							data-coll-name={ c.Name }
+							onclick="renameCollection(this.dataset.collId, this.dataset.collName)"
+						><span class="mi">edit</span>Переименовать</button>
+						<button
+							class="row-menu-item danger"
+							data-coll-id={ c.ID }
+							data-coll-name={ c.Name }
+							onclick="deleteCollection(this.dataset.collId, this.dataset.collName)"
+						><span class="mi">delete</span>Удалить коллекцию</button>
+					</div>
+				</div>
 			}
 		}
 	</nav>
@@ -153,7 +172,7 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 						<div
 							id="queue-inner"
 							hx-get="queue/items"
-							hx-trigger="load, mediaRefresh from:body"
+							hx-trigger="load, queueRefresh from:body"
 							hx-swap="outerHTML"
 						>
 							<div class="empty-state">
@@ -264,16 +283,20 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 
 		@ActionBar()
 
-		<!-- ── SSE: dispatches htmx mediaRefresh ── -->
+		<!-- ── SSE: сервер присылает конкретные темы, обновляем только их ── -->
 		<script>
 			(function() {
 				const base = document.querySelector('base')?.href || '/';
 				const es = new EventSource(base + 'events');
-				function dispatchRefresh() {
-					htmx.trigger(document.body, 'mediaRefresh');
+				const topics = {
+					library:     'mediaRefresh',
+					queue:       'queueRefresh',
+					tags:        'tagsRefresh',
+					collections: 'collectionsRefresh',
+				};
+				for (const [topic, event] of Object.entries(topics)) {
+					es.addEventListener(topic, () => htmx.trigger(document.body, event));
 				}
-				es.addEventListener('update', dispatchRefresh);
-				es.addEventListener('message', dispatchRefresh);
 			})();
 		</script>
 

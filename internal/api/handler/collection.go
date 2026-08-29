@@ -4,37 +4,23 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/a-h/templ"
-	"github.com/dr-duke/talmorGo/internal/repo"
-	"github.com/dr-duke/talmorGo/web/templates"
+	"github.com/dr-duke/talmorGo/internal/library"
 )
 
 type CollectionHandler struct {
-	Collections repo.CollectionRepo
+	Lib *library.Service
 }
 
-// List отдаёт JSON-список коллекций (для dropdown в action bar).
-func (h *CollectionHandler) Fragment(w http.ResponseWriter, r *http.Request) {
-	cols, err := h.Collections.List(r.Context())
+// ListJSON отдаёт коллекции для выпадающего списка в панели действий.
+func (h *CollectionHandler) ListJSON(w http.ResponseWriter, r *http.Request) {
+	cols, err := h.Lib.ListCollections(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(cols) //nolint:errcheck
+	writeJSON(w, cols)
 }
 
-// Cards отдаёт HTML-фрагмент карточек коллекций (для вкладки Коллекции).
-func (h *CollectionHandler) Cards(w http.ResponseWriter, r *http.Request) {
-	cols, err := h.Collections.List(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	templ.Handler(templates.CollectionsCards(cols)).ServeHTTP(w, r)
-}
-
-// Create создаёт коллекцию и возвращает JSON с созданной записью.
 func (h *CollectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
@@ -43,31 +29,26 @@ func (h *CollectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	col, err := h.Collections.Create(r.Context(), body.Name)
+	col, err := h.Lib.CreateCollection(r.Context(), body.Name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("HX-Trigger", "collectionsRefresh")
+	setTrigger(w, "collectionsRefresh")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(col) //nolint:errcheck
 }
 
-// Delete удаляет коллекцию (видео остаются).
+// Delete удаляет коллекцию; сами видео остаются в медиатеке.
 func (h *CollectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := h.Collections.Delete(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := h.Lib.DeleteCollection(r.Context(), r.PathValue("id")); err != nil {
+		httpError(w, err)
 		return
 	}
-	w.Header().Set("HX-Trigger", `{"collectionsRefresh":true,"tagsRefresh":true}`)
-	w.WriteHeader(http.StatusNoContent)
+	refresh(w, "collectionsRefresh", "tagsRefresh", "mediaRefresh")
 }
 
-// Rename переименовывает коллекцию.
 func (h *CollectionHandler) Rename(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
 	var body struct {
 		Name string `json:"name"`
 	}
@@ -75,17 +56,15 @@ func (h *CollectionHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if err := h.Collections.Rename(r.Context(), id, body.Name); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := h.Lib.RenameCollection(r.Context(), r.PathValue("id"), body.Name); err != nil {
+		httpError(w, err)
 		return
 	}
-	w.Header().Set("HX-Trigger", `{"collectionsRefresh":true,"tagsRefresh":true}`)
-	w.WriteHeader(http.StatusNoContent)
+	refresh(w, "collectionsRefresh", "tagsRefresh", "mediaRefresh")
 }
 
-// AddJobs добавляет набор заданий в коллекцию через тег.
+// AddJobs добавляет выбранные задания в коллекцию.
 func (h *CollectionHandler) AddJobs(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
 	var body struct {
 		JobIDs []string `json:"job_ids"`
 	}
@@ -93,10 +72,9 @@ func (h *CollectionHandler) AddJobs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if err := h.Collections.AddJobs(r.Context(), id, body.JobIDs); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := h.Lib.AddJobsToCollection(r.Context(), r.PathValue("id"), body.JobIDs); err != nil {
+		httpError(w, err)
 		return
 	}
-	w.Header().Set("HX-Trigger", `{"collectionsRefresh":true,"tagsRefresh":true,"mediaRefresh":true,"showToast":"Добавлено в коллекцию"}`)
-	w.WriteHeader(http.StatusNoContent)
+	refresh(w, "collectionsRefresh", "tagsRefresh", "mediaRefresh")
 }
