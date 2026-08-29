@@ -69,13 +69,13 @@ func (s *DirScanner) Start(ctx context.Context) {
 }
 
 func (s *DirScanner) scan(ctx context.Context) {
-	known, err := s.items.AllPaths(ctx)
+	known, err := s.items.KnownPaths(ctx)
 	if err != nil {
 		slog.Error("dir-scanner: get known paths", "err", err)
 		return
 	}
 
-	imported := 0
+	imported, restored := 0, 0
 	walkErr := filepath.WalkDir(s.dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -95,7 +95,8 @@ func (s *DirScanner) scan(ctx context.Context) {
 		if !mediaExtensions[strings.ToLower(filepath.Ext(d.Name()))] {
 			return nil
 		}
-		if _, ok := known[path]; ok {
+		available, isKnown := known[path]
+		if isKnown && available {
 			return nil
 		}
 		if s.inFlight != nil && s.inFlight.Contains(path) {
@@ -105,19 +106,33 @@ func (s *DirScanner) scan(ctx context.Context) {
 		if infoErr != nil {
 			return nil
 		}
+
+		// Файл вернулся на место удалённого или потерянного — восстанавливаем
+		// существующую запись, а не заводим новое задание.
+		if isKnown {
+			ok, err := s.items.RestoreByPath(ctx, path, info.Size())
+			if err != nil {
+				slog.Error("dir-scanner: restore file", "path", path, "err", err)
+			} else if ok {
+				restored++
+				known[path] = true
+			}
+			return nil
+		}
+
 		if importErr := s.importFile(ctx, path, d.Name(), info.Size()); importErr != nil {
 			slog.Error("dir-scanner: import file", "path", path, "err", importErr)
 		} else {
 			imported++
-			known[path] = struct{}{}
+			known[path] = true
 		}
 		return nil
 	})
 	if walkErr != nil && !os.IsNotExist(walkErr) {
 		slog.Error("dir-scanner: walk", "dir", s.dir, "err", walkErr)
 	}
-	if imported > 0 {
-		slog.Info("dir-scanner: imported", "files", imported, "dir", s.dir)
+	if imported > 0 || restored > 0 {
+		slog.Info("dir-scanner: scan complete", "imported", imported, "restored", restored, "dir", s.dir)
 	}
 }
 

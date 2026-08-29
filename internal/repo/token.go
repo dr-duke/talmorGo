@@ -5,16 +5,17 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/dr-duke/talmorGo/internal/db"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/google/uuid"
 )
 
 type sqliteTokenRepo struct {
-	db *sql.DB
+	db *db.DB
 }
 
-func NewTokenRepo(db *sql.DB) TokenRepo {
-	return &sqliteTokenRepo{db: db}
+func NewTokenRepo(database *db.DB) TokenRepo {
+	return &sqliteTokenRepo{db: database}
 }
 
 func (r *sqliteTokenRepo) Upsert(ctx context.Context, itemID string) (*model.Token, error) {
@@ -45,6 +46,17 @@ func (r *sqliteTokenRepo) GetByToken(ctx context.Context, token string) (*model.
 	row := r.db.QueryRowContext(ctx,
 		`SELECT token, item_id, created_at FROM tokens WHERE token=?`, token)
 	return scanToken(row)
+}
+
+// DeleteByItemID отзывает постоянную ссылку: старый адрес перестаёт работать,
+// следующий запрос ссылки выдаст новый токен.
+func (r *sqliteTokenRepo) DeleteByItemID(ctx context.Context, itemID string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM tokens WHERE item_id=?`, itemID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 func (r *sqliteTokenRepo) getByItemID(ctx context.Context, itemID string) (*model.Token, error) {

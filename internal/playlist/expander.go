@@ -1,6 +1,6 @@
 // Package playlist содержит общую логику разворачивания URL в задания:
 // проверку «плейлист или одиночное видео» и создание отдельных job на каждое видео.
-// Используется веб-обработчиками (add/redownload) и Telegram-ботом, чтобы не дублировать код.
+// Используется сервисом очереди, за которым стоят и веб, и Telegram-бот.
 package playlist
 
 import (
@@ -18,6 +18,13 @@ type Expander struct {
 	Jobs repo.JobRepo
 	Tags repo.TagRepo
 	Hub  *sse.Hub // опционально: уведомляет браузер после разворачивания
+}
+
+// Result — чем закончилась проверка ссылки.
+type Result struct {
+	IsPlaylist    bool
+	PlaylistTitle string
+	Created       int // сколько заданий создано (для плейлиста)
 }
 
 func New(jobs repo.JobRepo, tags repo.TagRepo) *Expander {
@@ -60,21 +67,25 @@ func (e *Expander) CreateJobs(ctx context.Context, info *downloader.PlaylistInfo
 //   - плейлист        → удаляет placeholder и создаёт отдельные задания (CreateJobs).
 //
 // Вызывается асинхронно: placeholder создан в статусе checking, который воркер игнорирует.
-func (e *Expander) ResolvePlaceholder(ctx context.Context, placeholderID, rawURL string, opts downloader.Options, source string, chatID int64) {
+func (e *Expander) ResolvePlaceholder(ctx context.Context, placeholderID, rawURL string, opts downloader.Options, source string, chatID int64) Result {
 	info := downloader.FetchPlaylist(ctx, rawURL, opts)
+	if e.Hub != nil {
+		// Плейлист создаёт задания и тег с его названием — меняются все три области.
+		defer e.Hub.Publish(sse.TopicQueue, sse.TopicLibrary, sse.TopicTags)
+	}
+
 	if info == nil {
 		// Одиночное видео — переводим checking → pending.
 		if err := e.Jobs.ConfirmSingle(ctx, placeholderID); err != nil {
 			slog.Error("playlist: confirm single", "id", placeholderID, "err", err)
 		}
-	} else {
-		// Плейлист: удаляем placeholder и создаём индивидуальные задания.
-		if err := e.Jobs.DeleteChecking(ctx, placeholderID); err != nil {
-			slog.Error("playlist: delete checking placeholder", "id", placeholderID, "err", err)
-		}
-		e.CreateJobs(ctx, info, source, chatID)
+		return Result{}
 	}
-	if e.Hub != nil {
-		e.Hub.Broadcast()
+
+	// Плейлист: удаляем placeholder и создаём индивидуальные задания.
+	if err := e.Jobs.DeleteChecking(ctx, placeholderID); err != nil {
+		slog.Error("playlist: delete checking placeholder", "id", placeholderID, "err", err)
 	}
+	created := e.CreateJobs(ctx, info, source, chatID)
+	return Result{IsPlaylist: true, PlaylistTitle: info.PlaylistTitle, Created: created}
 }

@@ -32,7 +32,7 @@ func cleanFileName(name string) string {
 type JobStatus string
 
 const (
-	JobChecking  JobStatus = "checking"  // yt-dlp проверяет, не плейлист ли URL
+	JobChecking  JobStatus = "checking" // yt-dlp проверяет, не плейлист ли URL
 	JobPending   JobStatus = "pending"
 	JobRunning   JobStatus = "running"
 	JobRetrying  JobStatus = "retrying"
@@ -130,7 +130,7 @@ func (i *Item) IsVideo() bool     { return i.Kind == "video" }
 // MediaItem — объединённое представление задания и (опционально) медиаэлемента.
 type MediaItem struct {
 	Job  *Job
-	Item *Item  // nil пока файл не скачан
+	Item *Item // nil пока файл не скачан
 	Tags []string
 }
 
@@ -185,26 +185,29 @@ type Tag struct {
 }
 
 // Collection — именованная коллекция (имя совпадает с именем тега kind='collection').
+// Теги json заданы явно: структура уходит в браузер, и клиентский код не должен
+// зависеть от умолчаний сериализации Go.
 type Collection struct {
-	ID        string
-	Name      string
-	CreatedAt time.Time
-	ItemCount int // заполняется репозиторием
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+	ItemCount int       `json:"item_count"` // заполняется репозиторием
 }
 
 // TagWithCount — тег с количеством привязанных заданий.
 type TagWithCount struct {
-	Name         string
-	Count        int
-	IsCollection bool
+	Name         string `json:"name"`
+	Count        int    `json:"count"`
+	IsCollection bool   `json:"is_collection"`
 }
 
 // MediaFilter — параметры серверной фильтрации медиатеки.
 type MediaFilter struct {
-	Query string   // текстовый поиск (имя файла, URL, заголовок)
-	Kind  string   // "" | "video" | "audio"
-	Tags  []string // AND-пересечение тегов (включая коллекции)
-	Limit int      // максимум строк; 0 = без ограничений
+	Query  string   // текстовый поиск (имя файла, URL, заголовок, теги)
+	Kind   string   // "" | "video" | "audio"
+	Tags   []string // AND-пересечение тегов (включая коллекции)
+	Limit  int      // максимум строк; 0 = без ограничений
+	Offset int      // сдвиг для постраничной догрузки; учитывается только при Limit > 0
 }
 
 // CookieRecord — куки одного домена (Netscape-формат).

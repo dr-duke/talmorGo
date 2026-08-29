@@ -26,7 +26,7 @@ services:
       YT_DLP_EXTRA_ARGS: "${YT_DLP_EXTRA_ARGS:-}"
       WORKER_COUNT: "${WORKER_COUNT:-2}"
 
-      # Пути (внутри контейнера)
-      YT_DLP_BINARY: /app/yt-dlp
+      # Пути (внутри контейнера).
+      # YT_DLP_BINARY не задаём: образ сам указывает на /usr/bin/yt-dlp.
       YT_DLP_OUTPUT_DIR: /data
       DB_PATH: /data/talmor.db

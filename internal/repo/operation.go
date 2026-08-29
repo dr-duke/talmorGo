@@ -7,16 +7,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dr-duke/talmorGo/internal/db"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/google/uuid"
 )
 
+const operationSelect = `SELECT id, kind, status, title, payload, created_at,
+	COALESCE(started_at,''), COALESCE(finished_at,''), COALESCE(error,'') FROM operations`
+
 type sqliteOperationRepo struct {
-	db *sql.DB
+	db *db.DB
 }
 
-func NewOperationRepo(db *sql.DB) OperationRepo {
-	return &sqliteOperationRepo{db: db}
+func NewOperationRepo(database *db.DB) OperationRepo {
+	return &sqliteOperationRepo{db: database}
 }
 
 func (r *sqliteOperationRepo) Create(ctx context.Context, op *model.Operation) error {
@@ -35,37 +39,40 @@ func (r *sqliteOperationRepo) Create(ctx context.Context, op *model.Operation) e
 	return err
 }
 
-func (r *sqliteOperationRepo) ClaimNext(ctx context.Context) (*model.Operation, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback() //nolint:errcheck
+func (r *sqliteOperationRepo) GetByID(ctx context.Context, id string) (*model.Operation, error) {
+	row := r.db.QueryRowContext(ctx, operationSelect+` WHERE id=?`, id)
+	return scanOperation(row)
+}
 
-	var op model.Operation
-	var createdAt string
-	err = tx.QueryRowContext(ctx,
-		`SELECT id, kind, title, payload, created_at FROM operations WHERE status='pending' ORDER BY created_at LIMIT 1`,
-	).Scan(&op.ID, &op.Kind, &op.Title, &op.Payload, &createdAt)
+// ClaimNext атомарно забирает старейшую pending-операцию из указанных видов.
+// Разделение по видам позволяет держать несколько исполнителей: лёгкие операции
+// не ждут завершения тяжёлых (ffmpeg).
+func (r *sqliteOperationRepo) ClaimNext(ctx context.Context, kinds []string) (*model.Operation, error) {
+	// Порядок аргументов: сначала started_at из SET, затем виды из WHERE.
+	args := []any{time.Now().UTC().Format(time.RFC3339Nano)}
+
+	where := `status='pending'`
+	if len(kinds) > 0 {
+		placeholders := make([]string, len(kinds))
+		for i, k := range kinds {
+			placeholders[i] = "?"
+			args = append(args, k)
+		}
+		where += ` AND kind IN (` + strings.Join(placeholders, ",") + `)`
+	}
+
+	row := r.db.WriteRowContext(ctx,
+		`UPDATE operations SET status='running', started_at=?
+		 WHERE id = (SELECT id FROM operations WHERE `+where+` ORDER BY created_at LIMIT 1)
+		 RETURNING id, kind, status, title, payload, created_at,
+		           COALESCE(started_at,''), COALESCE(finished_at,''), COALESCE(error,'')`,
+		args...,
+	)
+	op, err := scanOperation(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE operations SET status='running', started_at=? WHERE id=?`, now, op.ID,
-	); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	op.Status = model.OpRunning
-	op.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	return &op, nil
+	return op, err
 }
 
 func (r *sqliteOperationRepo) SetDone(ctx context.Context, id string) error {
@@ -85,24 +92,19 @@ func (r *sqliteOperationRepo) SetFailed(ctx context.Context, id, errMsg string) 
 }
 
 func (r *sqliteOperationRepo) List(ctx context.Context, kinds []string) ([]*model.Operation, error) {
-	var rows *sql.Rows
-	var err error
-
-	if len(kinds) == 0 {
-		rows, err = r.db.QueryContext(ctx,
-			`SELECT id, kind, status, title, payload, created_at, COALESCE(started_at,''), COALESCE(finished_at,''), COALESCE(error,'')
-			 FROM operations ORDER BY created_at DESC`)
-	} else {
+	q := operationSelect
+	var args []any
+	if len(kinds) > 0 {
 		placeholders := make([]string, len(kinds))
-		args := make([]any, len(kinds))
 		for i, k := range kinds {
 			placeholders[i] = "?"
-			args[i] = k
+			args = append(args, k)
 		}
-		q := `SELECT id, kind, status, title, payload, created_at, COALESCE(started_at,''), COALESCE(finished_at,''), COALESCE(error,'')
-			  FROM operations WHERE kind IN (` + strings.Join(placeholders, ",") + `) ORDER BY created_at DESC`
-		rows, err = r.db.QueryContext(ctx, q, args...)
+		q += ` WHERE kind IN (` + strings.Join(placeholders, ",") + `)`
 	}
+	q += ` ORDER BY created_at DESC`
+
+	rows, err := r.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -124,9 +126,34 @@ func (r *sqliteOperationRepo) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-func scanOperation(s interface {
-	Scan(...any) error
-}) (*model.Operation, error) {
+// ResetStale возвращает в очередь операции, оборванные рестартом приложения.
+// Без этого запись навсегда оставалась бы в статусе running и висела в UI.
+func (r *sqliteOperationRepo) ResetStale(ctx context.Context) (int, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE operations SET status='pending', started_at=NULL WHERE status='running'`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// DeleteFinishedBefore подчищает завершённые операции: без этого таблица растёт
+// бесконечно — видимые записи пользователь закрывает вручную, а закрывает редко.
+func (r *sqliteOperationRepo) DeleteFinishedBefore(ctx context.Context, cutoff time.Time) (int, error) {
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM operations
+		 WHERE status IN ('done','failed')
+		   AND COALESCE(finished_at, created_at) < ?`,
+		cutoff.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+func scanOperation(s scanner) (*model.Operation, error) {
 	var op model.Operation
 	var createdAt, startedAt, finishedAt string
 	err := s.Scan(

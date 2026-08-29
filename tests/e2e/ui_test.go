@@ -14,8 +14,12 @@ import (
 	"github.com/dr-duke/talmorGo/internal/api"
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/db"
+	"github.com/dr-duke/talmorGo/internal/library"
 	"github.com/dr-duke/talmorGo/internal/model"
+	"github.com/dr-duke/talmorGo/internal/playlist"
+	"github.com/dr-duke/talmorGo/internal/queue"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/internal/settings"
 	"github.com/dr-duke/talmorGo/internal/sse"
 	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/google/uuid"
@@ -29,9 +33,29 @@ import (
 var tabCtx context.Context
 var tabCancel context.CancelFunc
 
+// chromePath возвращает путь к браузеру: из CHROME_PATH, иначе из типовых мест
+// установки. Раньше путь был зашит под macOS и тесты не шли ни в CI, ни в Linux.
+func chromePath() string {
+	if p := os.Getenv("CHROME_PATH"); p != "" {
+		return p
+	}
+	candidates := []string{
+		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+		"/Applications/Chromium.app/Contents/MacOS/Chromium",
+		"/usr/bin/google-chrome",
+		"/usr/bin/chromium",
+		"/usr/bin/chromium-browser",
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return "" // chromedp сам поищет браузер в PATH
+}
+
 func TestMain(m *testing.M) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.ExecPath("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
@@ -39,6 +63,9 @@ func TestMain(m *testing.M) {
 		chromedp.Flag("allow-running-insecure-content", true),
 		chromedp.Flag("unsafely-treat-insecure-origin-as-secure", "http://127.0.0.1"),
 	)
+	if p := chromePath(); p != "" {
+		opts = append(opts, chromedp.ExecPath(p))
+	}
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer allocCancel()
 
@@ -67,8 +94,13 @@ func newTab(t *testing.T) (context.Context, context.CancelFunc) {
 
 type fakePool struct{}
 
-func (p *fakePool) Enqueue()               {}
-func (p *fakePool) CancelJob(string) bool  { return false }
+func (p *fakePool) Enqueue()              {}
+func (p *fakePool) CancelJob(string) bool { return false }
+
+type fakeRunner struct{}
+
+func (r *fakeRunner) Enqueue()           {}
+func (r *fakeRunner) Cancel(string) bool { return false }
 
 type testEnv struct {
 	URL     string
@@ -96,10 +128,38 @@ func newTestEnv(t *testing.T) *testEnv {
 	tokenRepo := repo.NewTokenRepo(database)
 	tagRepo := repo.NewTagRepo(database)
 	cookieRepo := repo.NewCookieRepo(database)
+	settingsRepo := repo.NewSettingsRepo(database)
 
-	cfg := &config.Config{BaseURL: "", BasePath: "", SiteName: "TalmorGo"}
-	fp := &fakePool{}
-	srv := api.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, cookieRepo, repo.NewSettingsRepo(database), repo.NewCollectionRepo(database), repo.NewOperationRepo(database), storage.New(tmpDir), fp, fp, sse.New())
+	cfg := &config.Config{
+		BaseURL: "", BasePath: "", SiteName: "TalmorGo",
+		YtDlpOutputDir: tmpDir,
+		YtDlpBinary:    filepath.Join(tmpDir, "no-such-yt-dlp"),
+		LibPageSize:    200,
+	}
+	store := storage.New(tmpDir)
+	provider := settings.New(cfg, settingsRepo)
+	hub := sse.New()
+	pool := &fakePool{}
+
+	expander := playlist.New(jobRepo, tagRepo)
+	expander.Hub = hub
+
+	srv := api.New(api.Deps{
+		Cfg: cfg,
+		Lib: &library.Service{
+			Jobs: jobRepo, Items: itemRepo, Tags: tagRepo, Tokens: tokenRepo,
+			Collections: repo.NewCollectionRepo(database),
+			Ops:         repo.NewOperationRepo(database),
+			Storage:     store, Settings: provider, Cfg: cfg, Runner: &fakeRunner{},
+		},
+		Queue: &queue.Service{
+			Jobs: jobRepo, Items: itemRepo, Storage: store,
+			Expander: expander, Pool: pool, Settings: provider, Hub: hub,
+		},
+		Settings: provider,
+		Cookies:  cookieRepo,
+		Hub:      hub,
+	})
 	ts := httptest.NewServer(srv.Handler())
 
 	return &testEnv{

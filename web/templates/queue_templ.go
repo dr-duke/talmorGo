@@ -35,7 +35,7 @@ func QueueItems(jobs []*model.Job, operations []*model.Operation) templ.Componen
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"queue-inner\" hx-get=\"queue/items\" hx-trigger=\"mediaRefresh from:body\" hx-swap=\"outerHTML\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"queue-inner\" hx-get=\"queue/items\" hx-trigger=\"queueRefresh from:body\" hx-swap=\"outerHTML\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

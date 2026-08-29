@@ -6,16 +6,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dr-duke/talmorGo/internal/db"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/google/uuid"
 )
 
 type sqliteItemRepo struct {
-	db *sql.DB
+	db *db.DB
 }
 
-func NewItemRepo(db *sql.DB) ItemRepo {
-	return &sqliteItemRepo{db: db}
+func NewItemRepo(database *db.DB) ItemRepo {
+	return &sqliteItemRepo{db: database}
 }
 
 const itemSelect = `
@@ -31,6 +32,8 @@ func (r *sqliteItemRepo) Create(ctx context.Context, item *model.Item) error {
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = time.Now().UTC()
 	}
+	// Файл по тому же пути появился снова: снимаем пометки об удалении и пропаже,
+	// иначе восстановленный файл остаётся в медиатеке в статусе «удалён».
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO items (id, job_id, kind, path, name, size, duration,
 		                    title, artist, album, year, genre, created_at)
@@ -38,7 +41,8 @@ func (r *sqliteItemRepo) Create(ctx context.Context, item *model.Item) error {
 		 ON CONFLICT(path) DO UPDATE SET
 		     name=excluded.name, size=excluded.size, duration=excluded.duration,
 		     title=excluded.title, artist=excluded.artist, album=excluded.album,
-		     year=excluded.year, genre=excluded.genre`,
+		     year=excluded.year, genre=excluded.genre,
+		     deleted_at=NULL, lost_at=NULL`,
 		item.ID, nullStr(item.JobID), item.Kind, item.Path, item.Name,
 		item.Size, item.Duration,
 		item.Meta.Title, item.Meta.Artist, item.Meta.Album, item.Meta.Year, item.Meta.Genre,
@@ -103,21 +107,33 @@ func (r *sqliteItemRepo) ListDeleted(ctx context.Context) ([]*model.DeletedItem,
 	return out, rows.Err()
 }
 
-func (r *sqliteItemRepo) AllPaths(ctx context.Context) (map[string]struct{}, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT path FROM items`)
+func (r *sqliteItemRepo) KnownPaths(ctx context.Context) (map[string]bool, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT path, (deleted_at IS NULL AND lost_at IS NULL) FROM items`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	paths := make(map[string]struct{})
+	paths := make(map[string]bool)
 	for rows.Next() {
 		var p string
-		if err := rows.Scan(&p); err != nil {
+		var available bool
+		if err := rows.Scan(&p, &available); err != nil {
 			return nil, err
 		}
-		paths[p] = struct{}{}
+		paths[p] = available
 	}
 	return paths, rows.Err()
+}
+
+func (r *sqliteItemRepo) RestoreByPath(ctx context.Context, path string, size int64) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE items SET deleted_at=NULL, lost_at=NULL, size=? WHERE path=?`, size, path)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 func (r *sqliteItemRepo) PathsForCleanup(ctx context.Context) ([]string, error) {
@@ -174,23 +190,15 @@ func (r *sqliteItemRepo) MarkFound(ctx context.Context, id string) error {
 	return err
 }
 
-func (r *sqliteItemRepo) UpdateMeta(ctx context.Context, id string, meta model.AudioMeta) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE items SET title=?, artist=?, album=?, year=?, genre=? WHERE id=?`,
-		meta.Title, meta.Artist, meta.Album, meta.Year, meta.Genre, id)
-	return err
-}
-
 func (r *sqliteItemRepo) BulkUpdateMetaFields(ctx context.Context, ids []string, fields map[string]string) error {
 	if len(ids) == 0 || len(fields) == 0 {
 		return nil
 	}
 	// Белый список колонок — защита от SQL-инъекций через ключи map.
-	allowed := map[string]bool{"title": true, "artist": true, "album": true, "year": true, "genre": true}
 	var setClauses []string
 	var args []any
 	for _, col := range []string{"title", "artist", "album", "year", "genre"} {
-		if val, ok := fields[col]; ok && allowed[col] {
+		if val, ok := fields[col]; ok {
 			setClauses = append(setClauses, col+"=?")
 			args = append(args, val)
 		}

@@ -13,8 +13,12 @@ import (
 	"github.com/dr-duke/talmorGo/internal/bot"
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/db"
+	"github.com/dr-duke/talmorGo/internal/library"
 	"github.com/dr-duke/talmorGo/internal/ops"
+	"github.com/dr-duke/talmorGo/internal/playlist"
+	"github.com/dr-duke/talmorGo/internal/queue"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/internal/settings"
 	"github.com/dr-duke/talmorGo/internal/sse"
 	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/dr-duke/talmorGo/internal/worker"
@@ -41,6 +45,7 @@ func main() {
 	defer database.Close()
 	slog.Info("db opened", "path", cfg.DBPath)
 
+	// ── Репозитории ──
 	jobRepo := repo.NewJobRepo(database)
 	itemRepo := repo.NewItemRepo(database)
 	tokenRepo := repo.NewTokenRepo(database)
@@ -50,27 +55,51 @@ func main() {
 	collectionRepo := repo.NewCollectionRepo(database)
 	operationRepo := repo.NewOperationRepo(database)
 
+	// ── Инфраструктура ──
 	hub := sse.New()
+	store := storage.New(cfg.YtDlpOutputDir)
+	settingsProvider := settings.New(cfg, settingsRepo)
 
+	// ── Исполнители ──
 	pool := worker.NewPool(cfg, jobRepo, itemRepo, tokenRepo, nil)
 	pool.SetHub(hub)
-	pool.SetSettingsRepo(settingsRepo)
+	pool.SetSettings(settingsProvider)
 
-	store := storage.New(cfg.YtDlpOutputDir)
 	opsWorker := ops.NewWorker(operationRepo, tagRepo, jobRepo, itemRepo, store, cfg, hub)
 
+	// ── Сервисы ──
+	libSvc := &library.Service{
+		Jobs: jobRepo, Items: itemRepo, Tags: tagRepo, Tokens: tokenRepo,
+		Collections: collectionRepo, Ops: operationRepo,
+		Storage: store, Settings: settingsProvider, Cfg: cfg, Runner: opsWorker,
+	}
+
+	expander := playlist.New(jobRepo, tagRepo)
+	expander.Hub = hub
+	queueSvc := &queue.Service{
+		Jobs: jobRepo, Items: itemRepo, Storage: store,
+		Expander: expander, Pool: pool, Settings: settingsProvider, Hub: hub,
+	}
+
+	// ── Telegram ──
 	var tgBot *bot.Bot
 	if cfg.TelegramBotToken != "" {
-		tgBot, err = bot.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, pool, settingsRepo)
+		tgBot, err = bot.New(cfg, jobRepo, tokenRepo, queueSvc)
 		if err != nil {
 			slog.Warn("bot init failed, running without telegram", "err", err)
 		} else {
 			pool.SetNotifier(tgBot)
+			queueSvc.SetObserver(tgBot)
 		}
 	} else {
 		slog.Info("TELEGRAM_BOT_TOKEN not set, running in web-only mode")
 	}
-	srv := api.New(cfg, jobRepo, itemRepo, tokenRepo, tagRepo, cookieRepo, settingsRepo, collectionRepo, operationRepo, store, pool, opsWorker, hub)
+
+	// ── HTTP ──
+	srv := api.New(api.Deps{
+		Cfg: cfg, Lib: libSvc, Queue: queueSvc,
+		Settings: settingsProvider, Cookies: cookieRepo, Hub: hub,
+	})
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPHost + ":" + cfg.HTTPPort,
 		Handler: srv.Handler(),
@@ -96,6 +125,9 @@ func main() {
 	}
 	go checker.Start(ctx)
 	go dirScanner.Start(ctx)
+
+	// Задания, оборванные на проверке плейлиста, разворачиваем заново.
+	queueSvc.RecoverChecking(ctx)
 
 	<-ctx.Done()
 	slog.Info("shutting down…")

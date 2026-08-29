@@ -15,7 +15,7 @@ func TestCleanFileName(t *testing.T) {
 		{"Юр.mp4", "Юр.mp4"},
 		{"Восток.m4a", "Восток.m4a"},
 		{"normal_video.mp4", "normal_video.mp4"},
-		{"video [abc].mp4", "video [abc].mp4"},         // ID too short — не трогаем
+		{"video [abc].mp4", "video [abc].mp4"}, // ID too short — не трогаем
 		{"video [toolongidthatismorethan15chars].mp4", "video [toolongidthatismorethan15chars].mp4"}, // слишком длинный
 	}
 	for _, c := range cases {

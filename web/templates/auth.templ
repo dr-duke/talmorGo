@@ -1,0 +1,27 @@
+package templates
+
+// Login — страница входа по токену (показывается, когда задан WEB_TOKEN).
+templ Login(basePath string, siteName string, failed bool) {
+	@Layout("Вход", basePath, siteName) {
+		<div class="login-wrap">
+			<form class="login-card" method="post" action="login">
+				<img src="static/logo.svg" width="48" height="48" alt=""/>
+				<h1 class="login-title">{ siteName }</h1>
+				<p class="login-hint">Введите токен доступа</p>
+				<input
+					type="password"
+					name="token"
+					class="login-input"
+					placeholder="WEB_TOKEN"
+					autocomplete="current-password"
+					autofocus
+					required
+				/>
+				if failed {
+					<p class="login-error">Неверный токен</p>
+				}
+				<button type="submit" class="btn btn-primary">Войти</button>
+			</form>
+		</div>
+	}
+}

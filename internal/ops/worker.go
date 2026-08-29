@@ -3,20 +3,32 @@ package ops
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/dr-duke/talmorGo/internal/audio"
 	"github.com/dr-duke/talmorGo/internal/config"
+	"github.com/dr-duke/talmorGo/internal/filecheck"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/sse"
 	"github.com/dr-duke/talmorGo/internal/storage"
 )
 
-// Worker исполняет пакетные операции в фоне, по одной за раз.
+// ErrCancelled — операция прервана пользователем.
+var ErrCancelled = errors.New("операция отменена")
+
+// Worker исполняет пакетные операции в фоне. Полосы (light/heavy) работают
+// параллельно и независимо, внутри полосы операции идут по одной.
+//
+// Каждая операция получает собственный отменяемый контекст с таймаутом:
+// зависший ffmpeg больше не блокирует очередь навсегда, а пользователь может
+// прервать операцию из интерфейса.
 type Worker struct {
 	Ops     repo.OperationRepo
 	Tags    repo.TagRepo
@@ -25,7 +37,17 @@ type Worker struct {
 	Storage *storage.Storage
 	Cfg     *config.Config
 	Hub     *sse.Hub
-	ch      chan struct{}
+
+	lanes []*lane
+
+	mu      sync.Mutex
+	cancels map[string]context.CancelFunc
+}
+
+type lane struct {
+	class string
+	kinds []string
+	ch    chan struct{}
 }
 
 func NewWorker(
@@ -39,85 +61,228 @@ func NewWorker(
 ) *Worker {
 	return &Worker{
 		Ops: ops, Tags: tags, Jobs: jobs, Items: items, Storage: store, Cfg: cfg, Hub: hub,
-		ch: make(chan struct{}, 1),
+		lanes: []*lane{
+			{class: ClassLight, kinds: KindsOfClass(ClassLight), ch: make(chan struct{}, 1)},
+			{class: ClassHeavy, kinds: KindsOfClass(ClassHeavy), ch: make(chan struct{}, 1)},
+		},
+		cancels: make(map[string]context.CancelFunc),
 	}
 }
 
-// Enqueue сигнализирует воркеру о наличии новой pending-операции (non-blocking).
+// Enqueue сигнализирует всем полосам о появлении новой операции (non-blocking).
 func (w *Worker) Enqueue() {
-	select {
-	case w.ch <- struct{}{}:
-	default:
+	for _, l := range w.lanes {
+		select {
+		case l.ch <- struct{}{}:
+		default:
+		}
 	}
 }
 
-// Start запускает цикл обработки; блокируется до отмены ctx.
+// Cancel прерывает выполняющуюся операцию. Возвращает true, если операция была запущена.
+func (w *Worker) Cancel(id string) bool {
+	w.mu.Lock()
+	cancel, ok := w.cancels[id]
+	w.mu.Unlock()
+	if ok {
+		cancel()
+	}
+	return ok
+}
+
+// Start восстанавливает оборванные операции и запускает полосы; блокируется до отмены ctx.
 func (w *Worker) Start(ctx context.Context) {
+	if n, err := w.Ops.ResetStale(ctx); err != nil {
+		slog.Error("ops: reset stale operations", "err", err)
+	} else if n > 0 {
+		slog.Info("ops: stale operations returned to queue", "count", n)
+	}
+
+	var wg sync.WaitGroup
+	for _, l := range w.lanes {
+		wg.Add(1)
+		go func(l *lane) {
+			defer wg.Done()
+			w.runLane(ctx, l)
+		}(l)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		w.runRetention(ctx)
+	}()
+
+	w.Enqueue() // подхватываем то, что осталось в очереди с прошлого запуска
+	wg.Wait()
+}
+
+// runRetention периодически подчищает завершённые операции.
+// Видимые записи пользователь закрывает вручную и делает это редко, поэтому без
+// уборки таблица растёт бесконечно.
+func (w *Worker) runRetention(ctx context.Context) {
+	retention := w.retention()
+	if retention <= 0 {
+		return
+	}
+	w.pruneOperations(ctx, retention)
+
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-w.ch:
-			w.drainPending(ctx)
+		case <-ticker.C:
+			w.pruneOperations(ctx, retention)
 		}
 	}
 }
 
-func (w *Worker) drainPending(ctx context.Context) {
+func (w *Worker) pruneOperations(ctx context.Context, retention time.Duration) {
+	n, err := w.Ops.DeleteFinishedBefore(ctx, time.Now().Add(-retention))
+	if err != nil {
+		slog.Error("ops: prune finished operations", "err", err)
+		return
+	}
+	if n > 0 {
+		slog.Info("ops: finished operations pruned", "count", n, "older_than", retention)
+		w.publish(sse.TopicQueue)
+	}
+}
+
+func (w *Worker) retention() time.Duration {
+	if w.Cfg == nil {
+		return 0
+	}
+	return time.Duration(w.Cfg.OpsRetentionHours) * time.Hour
+}
+
+func (w *Worker) runLane(ctx context.Context, l *lane) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-l.ch:
+			w.drainPending(ctx, l)
+		}
+	}
+}
+
+func (w *Worker) drainPending(ctx context.Context, l *lane) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("ops: panic in drainPending", "panic", r)
+			slog.Error("ops: panic in lane", "class", l.class, "panic", r)
 		}
 	}()
 	for {
-		op, err := w.Ops.ClaimNext(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		op, err := w.Ops.ClaimNext(ctx, l.kinds)
 		if err != nil {
-			slog.Error("ops: claim next", "err", err)
+			slog.Error("ops: claim next", "class", l.class, "err", err)
 			return
 		}
 		if op == nil {
 			return
 		}
-		w.Hub.Broadcast() // уведомить UI: статус running
+		w.runOne(ctx, op)
+	}
+}
 
-		var execErr error
-		switch op.Kind {
-		case KindBulkTag:
-			execErr = w.execBulkTag(ctx, op)
-		case KindBulkHide:
-			execErr = w.execBulkHide(ctx, op)
-		case KindBulkMeta:
-			execErr = w.execBulkMeta(ctx, op)
-		case KindExtractAudio:
-			execErr = w.execExtractAudio(ctx, op)
-		case KindUpdateMeta:
-			execErr = w.execUpdateMeta(ctx, op)
-		case KindReindex:
-			execErr = w.execReindex(ctx, op)
-		case KindCleanup:
-			execErr = w.execCleanup(ctx, op)
-		default:
-			slog.Warn("ops: unknown kind", "kind", op.Kind)
-		}
+// runOne исполняет одну операцию под собственным контекстом с таймаутом.
+func (w *Worker) runOne(ctx context.Context, op *model.Operation) {
+	opCtx, cancel := context.WithTimeout(ctx, w.opTimeout())
+	w.mu.Lock()
+	w.cancels[op.ID] = cancel
+	w.mu.Unlock()
+	defer func() {
+		w.mu.Lock()
+		delete(w.cancels, op.ID)
+		w.mu.Unlock()
+		cancel()
+	}()
 
-		if execErr != nil {
-			slog.Error("ops: exec failed", "kind", op.Kind, "id", op.ID, "err", execErr)
-			if err := w.Ops.SetFailed(ctx, op.ID, execErr.Error()); err != nil {
-				slog.Error("ops: set failed", "err", err)
-			}
+	w.publish(sse.TopicQueue) // уведомить UI: статус running
+
+	execErr := w.exec(opCtx, op)
+
+	// Прерывание пользователем и таймаут отражаем понятным текстом.
+	if execErr != nil && opCtx.Err() != nil {
+		if errors.Is(opCtx.Err(), context.DeadlineExceeded) {
+			execErr = fmt.Errorf("превышен таймаут %s", w.opTimeout())
 		} else {
-			if err := w.Ops.SetDone(ctx, op.ID); err != nil {
-				slog.Error("ops: set done", "err", err)
-			}
+			execErr = ErrCancelled
 		}
-		w.Hub.Broadcast() // уведомить UI: операция завершена
+	}
 
-		// Невидимые операции удаляем сразу — они не нужны в очереди и не имеют кнопки dismiss.
-		if !ShowInQueue[op.Kind] {
-			if err := w.Ops.Delete(ctx, op.ID); err != nil {
-				slog.Warn("ops: delete hidden op record", "id", op.ID, "err", err)
-			}
+	if execErr != nil {
+		slog.Error("ops: exec failed", "kind", op.Kind, "id", op.ID, "err", execErr)
+		if err := w.Ops.SetFailed(context.WithoutCancel(ctx), op.ID, execErr.Error()); err != nil {
+			slog.Error("ops: set failed", "err", err)
 		}
+	} else if err := w.Ops.SetDone(context.WithoutCancel(ctx), op.ID); err != nil {
+		slog.Error("ops: set done", "err", err)
+	}
+	w.publish(topicsFor(op.Kind)...) // уведомить UI: операция завершена
+
+	// Невидимые операции удаляем сразу — они не нужны в очереди и не имеют кнопки dismiss.
+	if !ShowInQueue[op.Kind] {
+		if err := w.Ops.Delete(context.WithoutCancel(ctx), op.ID); err != nil {
+			slog.Warn("ops: delete hidden op record", "id", op.ID, "err", err)
+		}
+	}
+}
+
+func (w *Worker) exec(ctx context.Context, op *model.Operation) error {
+	switch op.Kind {
+	case KindBulkTag:
+		return w.execBulkTag(ctx, op)
+	case KindBulkHide:
+		return w.execBulkHide(ctx, op)
+	case KindBulkMeta:
+		return w.execBulkMeta(ctx, op)
+	case KindExtractAudio:
+		return w.execExtractAudio(ctx, op)
+	case KindUpdateMeta:
+		return w.execUpdateMeta(ctx, op)
+	case KindReindex:
+		return w.execReindex(ctx, op)
+	case KindCleanup:
+		return w.execCleanup(ctx, op)
+	default:
+		slog.Warn("ops: unknown kind", "kind", op.Kind)
+		return nil
+	}
+}
+
+func (w *Worker) opTimeout() time.Duration {
+	if w.Cfg != nil && w.Cfg.OpsTimeout > 0 {
+		return time.Duration(w.Cfg.OpsTimeout) * time.Second
+	}
+	return time.Hour
+}
+
+func (w *Worker) publish(topics ...sse.Topic) {
+	if w.Hub != nil {
+		w.Hub.Publish(topics...)
+	}
+}
+
+// topicsFor возвращает области интерфейса, которые меняет операция данного вида.
+// Сама запись операции всегда видна в очереди, поэтому TopicQueue есть везде.
+func topicsFor(kind string) []sse.Topic {
+	switch kind {
+	case KindBulkTag, KindBulkHide:
+		return []sse.Topic{sse.TopicQueue, sse.TopicLibrary, sse.TopicTags}
+	case KindBulkMeta, KindUpdateMeta, KindExtractAudio:
+		return []sse.Topic{sse.TopicQueue, sse.TopicLibrary}
+	case KindReindex:
+		return []sse.Topic{sse.TopicQueue, sse.TopicLibrary, sse.TopicTags, sse.TopicCollections}
+	case KindCleanup:
+		return []sse.Topic{sse.TopicQueue, sse.TopicLibrary, sse.TopicTags, sse.TopicCollections}
+	default:
+		return []sse.Topic{sse.TopicQueue, sse.TopicLibrary}
 	}
 }
 
@@ -155,6 +320,9 @@ func (w *Worker) execBulkHide(ctx context.Context, op *model.Operation) error {
 		return err
 	}
 	for _, id := range p.JobIDs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err := w.Jobs.Hide(ctx, id); err != nil {
 			slog.Warn("ops: hide job", "id", id, "err", err)
 		}
@@ -171,6 +339,9 @@ func (w *Worker) execBulkMeta(ctx context.Context, op *model.Operation) error {
 		return err
 	}
 	for _, id := range p.ItemIDs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		item, err := w.Items.GetByID(ctx, id)
 		if err != nil || item.IsDeleted() || item.IsLost() || item.Kind != "audio" {
 			continue
@@ -259,7 +430,7 @@ func (w *Worker) execUpdateMeta(ctx context.Context, op *model.Operation) error 
 	}
 	item, err := w.Items.GetByID(ctx, p.ItemID)
 	if err != nil || item.IsDeleted() || item.IsLost() || item.Kind != "audio" {
-		return nil
+		return nil //nolint:nilerr // элемент недоступен — записывать теги в файл нечего
 	}
 	return audio.WriteTags(ctx, w.Cfg.FfmpegBinary, item.Path, fields)
 }
@@ -271,26 +442,9 @@ func (w *Worker) execReindex(ctx context.Context, op *model.Operation) error {
 	if err != nil {
 		slog.Error("ops: reindex prune orphans", "err", err)
 	}
-	items, err := w.Items.ListAll(ctx)
+	lost, found, err := filecheck.Run(ctx, w.Items)
 	if err != nil {
-		return fmt.Errorf("list items: %w", err)
-	}
-	lost, found := 0, 0
-	for _, item := range items {
-		if item.IsDeleted() {
-			continue
-		}
-		_, statErr := os.Stat(item.Path)
-		missing := os.IsNotExist(statErr)
-		if missing && !item.IsLost() {
-			if e := w.Items.MarkLost(ctx, item.ID); e == nil {
-				lost++
-			}
-		} else if !missing && item.IsLost() {
-			if e := w.Items.MarkFound(ctx, item.ID); e == nil {
-				found++
-			}
-		}
+		return fmt.Errorf("check files: %w", err)
 	}
 	slog.Info("ops: reindex done",
 		"job_tags_pruned", nJobTags, "tags_pruned", nTags, "collections_pruned", nCollections,
@@ -306,6 +460,9 @@ func (w *Worker) execCleanup(ctx context.Context, op *model.Operation) error {
 		slog.Error("ops: cleanup paths", "err", err)
 	}
 	for _, p := range paths {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if delErr := w.Storage.Delete(p); delErr != nil {
 			slog.Warn("ops: cleanup delete file", "path", p, "err", delErr)
 		}

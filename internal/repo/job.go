@@ -7,18 +7,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dr-duke/talmorGo/internal/db"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/google/uuid"
 )
 
-const jobSelect = `SELECT id, url, status, title, error, source, chat_id, created_at, updated_at, retry_count, next_retry_at, first_failed_at, COALESCE(tg_message_id,0) FROM jobs`
+// jobColumnList — набор колонок, который умеет разбирать scanJob.
+// Используется и в SELECT, и в RETURNING у ClaimNext: списки обязаны совпадать.
+const jobColumnList = `id, url, status, title, error, source, chat_id,
+	created_at, updated_at, retry_count, next_retry_at, first_failed_at,
+	COALESCE(tg_message_id,0), hidden`
+
+const jobSelect = `SELECT ` + jobColumnList + ` FROM jobs`
 
 type sqliteJobRepo struct {
-	db *sql.DB
+	db *db.DB
 }
 
-func NewJobRepo(db *sql.DB) JobRepo {
-	return &sqliteJobRepo{db: db}
+func NewJobRepo(database *db.DB) JobRepo {
+	return &sqliteJobRepo{db: database}
 }
 
 func (r *sqliteJobRepo) Create(ctx context.Context, job *model.Job) error {
@@ -74,21 +81,34 @@ func (r *sqliteJobRepo) List(ctx context.Context, f JobFilter) ([]*model.Job, er
 	return jobs, rows.Err()
 }
 
-// mediaRowSQL — базовая проекция для всех media-запросов.
-// Все запросы должны возвращать ровно эти колонки в этом порядке.
-const mediaRowSQL = `
-	SELECT
-		j.id, j.url, j.status, j.title,
-		j.error, j.source, j.chat_id,
-		j.created_at, j.updated_at, j.retry_count, j.next_retry_at, j.first_failed_at,
-		j.hidden,
-		i.id, i.kind, i.name, i.size, i.path, i.duration,
-		i.title, i.artist, i.album, i.year, i.genre,
-		i.created_at, i.deleted_at, i.lost_at,
-		(SELECT GROUP_CONCAT(t2.name,'|')
-		 FROM job_tags jt2 JOIN tags t2 ON t2.id=jt2.tag_id WHERE jt2.job_id=j.id) AS tags,
-		COALESCE(i.created_at, j.created_at) AS sort_ts
-`
+// ListIDsByStatus возвращает идентификаторы заданий в указанных статусах.
+// Нужен для массовой отмены: воркеру передаются id активных загрузок.
+func (r *sqliteJobRepo) ListIDsByStatus(ctx context.Context, statuses ...model.JobStatus) ([]string, error) {
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(statuses))
+	args := make([]any, len(statuses))
+	for i, s := range statuses {
+		placeholders[i] = "?"
+		args[i] = s
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id FROM jobs WHERE status IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
 
 func (r *sqliteJobRepo) runMediaQuery(ctx context.Context, q string, args ...any) ([]*model.MediaItem, error) {
 	rows, err := r.db.QueryContext(ctx, q, args...)
@@ -107,199 +127,35 @@ func (r *sqliteJobRepo) runMediaQuery(ctx context.Context, q string, args ...any
 	return items, rows.Err()
 }
 
-// ListMedia возвращает:
-//   - одну строку на каждый item (один job → N items → N строк)
-//   - плюс одну строку на job без items (pending/running/retrying/failed/cancelled)
-func (r *sqliteJobRepo) ListMedia(ctx context.Context) ([]*model.MediaItem, error) {
-	q := mediaRowSQL + `
-		FROM items i
-		JOIN jobs j ON j.id = i.job_id
-		WHERE j.hidden = 0
-
-		UNION ALL
-
-		` + mediaRowSQL + `
-		FROM jobs j
-		LEFT JOIN items i ON i.id = NULL
-		WHERE j.hidden = 0
-		  AND j.status IN ('checking','pending','running','retrying','failed','cancelled')
-		  AND NOT EXISTS (SELECT 1 FROM items WHERE job_id = j.id)
-
-		ORDER BY sort_ts DESC
-	`
-	return r.runMediaQuery(ctx, q)
-}
-
-// SearchMedia ищет по имени, URL, заголовку и тегам (для Telegram-бота).
-func (r *sqliteJobRepo) SearchMedia(ctx context.Context, query string) ([]*model.MediaItem, error) {
-	like := "%" + query + "%"
-	q := mediaRowSQL + `
-		FROM items i
-		JOIN jobs j ON j.id = i.job_id
-		WHERE j.hidden = 0
-		  AND (i.name LIKE ? OR j.url LIKE ? OR j.title LIKE ?
-		       OR j.id IN (SELECT jt2.job_id FROM job_tags jt2
-		                   JOIN tags t2 ON t2.id=jt2.tag_id WHERE t2.name LIKE ?))
-
-		UNION ALL
-
-		` + mediaRowSQL + `
-		FROM jobs j
-		LEFT JOIN items i ON i.id = NULL
-		WHERE j.hidden = 0
-		  AND j.status IN ('checking','pending','running','retrying','failed','cancelled')
-		  AND NOT EXISTS (SELECT 1 FROM items WHERE job_id = j.id)
-		  AND (j.url LIKE ? OR j.title LIKE ?
-		       OR j.id IN (SELECT jt2.job_id FROM job_tags jt2
-		                   JOIN tags t2 ON t2.id=jt2.tag_id WHERE t2.name LIKE ?))
-
-		ORDER BY sort_ts DESC
-		LIMIT 10
-	`
-	return r.runMediaQuery(ctx, q, like, like, like, like, like, like, like)
-}
-
-// FilterMedia — серверная фильтрация: текст + kind + AND-теги.
+// FilterMedia — серверная фильтрация медиатеки: текст + тип + AND-теги,
+// с постраничной выдачей. Пустой фильтр возвращает всю медиатеку.
 func (r *sqliteJobRepo) FilterMedia(ctx context.Context, f model.MediaFilter) ([]*model.MediaItem, error) {
-	if f.Query == "" && f.Kind == "" && len(f.Tags) == 0 && f.Limit == 0 {
-		return r.ListMedia(ctx)
-	}
-
-	var fileConds []string
-	var fileArgs []any
-	var jobConds []string
-	var jobArgs []any
-
-	if f.Query != "" {
-		like := "%" + f.Query + "%"
-		fileConds = append(fileConds, "(i.name LIKE ? OR j.url LIKE ? OR j.title LIKE ?)")
-		fileArgs = append(fileArgs, like, like, like)
-		jobConds = append(jobConds, "(j.url LIKE ? OR j.title LIKE ?)")
-		jobArgs = append(jobArgs, like, like)
-	}
-
-	if f.Kind != "" {
-		fileConds = append(fileConds, "i.kind=?")
-		fileArgs = append(fileArgs, f.Kind)
-		// для pending-строк kind не применяется (нет item)
-	}
-
-	for _, tag := range f.Tags {
-		sub := `j.id IN (SELECT jt.job_id FROM job_tags jt JOIN tags t ON t.id=jt.tag_id WHERE t.name=?)`
-		fileConds = append(fileConds, sub)
-		fileArgs = append(fileArgs, tag)
-		jobConds = append(jobConds, sub)
-		jobArgs = append(jobArgs, tag)
-	}
-
-	fileWhere := " WHERE j.hidden=0"
-	if len(fileConds) > 0 {
-		fileWhere += " AND " + strings.Join(fileConds, " AND ")
-	}
-	jobAnd := ""
-	if len(jobConds) > 0 {
-		jobAnd = " AND " + strings.Join(jobConds, " AND ")
-	}
-
-	// Если фильтр по kind — показываем только items нужного типа, без pending-строк
-	// (у pending нет items, поэтому kind=audio/video логично исключает их).
-	pendingPart := ""
-	if f.Kind == "" {
-		pendingPart = `
-			UNION ALL
-
-			` + mediaRowSQL + `
-			FROM jobs j
-			LEFT JOIN items i ON i.id = NULL
-			WHERE j.hidden = 0
-			  AND j.status IN ('checking','pending','running','retrying','failed','cancelled')
-			  AND NOT EXISTS (SELECT 1 FROM items WHERE job_id = j.id)
-			` + jobAnd
-	}
-
-	q := mediaRowSQL + `
-		FROM items i
-		JOIN jobs j ON j.id = i.job_id
-		` + fileWhere + `
-		` + pendingPart + `
-
-		ORDER BY sort_ts DESC
-	`
-	if f.Limit > 0 {
-		q += fmt.Sprintf("LIMIT %d\n", f.Limit)
-	}
-	allArgs := append(fileArgs, jobArgs...)
-	return r.runMediaQuery(ctx, q, allArgs...)
+	q, args := buildMediaQuery(f)
+	return r.runMediaQuery(ctx, q, args...)
 }
 
-// CountMedia возвращает полное число строк, которые вернул бы FilterMedia без Limit.
+// CountMedia возвращает полное число строк для фильтра, без Limit/Offset.
 func (r *sqliteJobRepo) CountMedia(ctx context.Context, f model.MediaFilter) (int, error) {
-	var fileConds []string
-	var fileArgs []any
-	var jobConds []string
-	var jobArgs []any
-
-	if f.Query != "" {
-		like := "%" + f.Query + "%"
-		fileConds = append(fileConds, "(i.name LIKE ? OR j.url LIKE ? OR j.title LIKE ?)")
-		fileArgs = append(fileArgs, like, like, like)
-		jobConds = append(jobConds, "(j.url LIKE ? OR j.title LIKE ?)")
-		jobArgs = append(jobArgs, like, like)
-	}
-	if f.Kind != "" {
-		fileConds = append(fileConds, "i.kind=?")
-		fileArgs = append(fileArgs, f.Kind)
-	}
-	for _, tag := range f.Tags {
-		sub := `j.id IN (SELECT jt.job_id FROM job_tags jt JOIN tags t ON t.id=jt.tag_id WHERE t.name=?)`
-		fileConds = append(fileConds, sub)
-		fileArgs = append(fileArgs, tag)
-		jobConds = append(jobConds, sub)
-		jobArgs = append(jobArgs, tag)
-	}
-
-	fileWhere := " WHERE j.hidden=0"
-	if len(fileConds) > 0 {
-		fileWhere += " AND " + strings.Join(fileConds, " AND ")
-	}
-	jobAnd := ""
-	if len(jobConds) > 0 {
-		jobAnd = " AND " + strings.Join(jobConds, " AND ")
-	}
-
-	pendingPart := ""
-	if f.Kind == "" {
-		pendingPart = `
-			UNION ALL
-			SELECT j.id AS id FROM jobs j
-			LEFT JOIN items i ON i.id = NULL
-			WHERE j.hidden = 0
-			  AND j.status IN ('checking','pending','running','retrying','failed','cancelled')
-			  AND NOT EXISTS (SELECT 1 FROM items WHERE job_id = j.id)
-			` + jobAnd
-	}
-
-	countQ := `SELECT COUNT(*) FROM (
-		SELECT i.id AS id FROM items i
-		JOIN jobs j ON j.id = i.job_id
-		` + fileWhere + `
-		` + pendingPart + `
-	)`
-	allArgs := append(fileArgs, jobArgs...)
+	q, args := buildMediaCountQuery(f)
 	var n int
-	err := r.db.QueryRowContext(ctx, countQ, allArgs...).Scan(&n)
+	err := r.db.QueryRowContext(ctx, q, args...).Scan(&n)
 	return n, err
+}
+
+// SearchMedia — поиск для Telegram: тот же фильтр, что и в вебе, с лимитом выдачи.
+func (r *sqliteJobRepo) SearchMedia(ctx context.Context, query string) ([]*model.MediaItem, error) {
+	return r.FilterMedia(ctx, model.MediaFilter{Query: query, Limit: 10})
 }
 
 // LastMedia возвращает последние n доступных элементов.
 func (r *sqliteJobRepo) LastMedia(ctx context.Context, n int) ([]*model.MediaItem, error) {
-	q := mediaRowSQL + `
+	q := `SELECT ` + jobColumns + `, ` + itemColumns + `, ` + tagsColumn + ` AS tags,
+		COALESCE(i.created_at, j.created_at) AS sort_ts
 		FROM items i
 		JOIN jobs j ON j.id = i.job_id
 		WHERE j.status IN ('done','imported') AND i.deleted_at IS NULL AND i.lost_at IS NULL
 		ORDER BY sort_ts DESC
-		LIMIT ?
-	`
+		LIMIT ?`
 	return r.runMediaQuery(ctx, q, n)
 }
 
@@ -383,7 +239,7 @@ func scanMediaItem(s scanner) (*model.MediaItem, error) {
 
 func (r *sqliteJobRepo) ClaimNext(ctx context.Context) (*model.Job, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	row := r.db.QueryRowContext(ctx,
+	row := r.db.WriteRowContext(ctx,
 		`UPDATE jobs SET status='running', updated_at=?
 		 WHERE id = (
 		     SELECT id FROM jobs
@@ -391,7 +247,7 @@ func (r *sqliteJobRepo) ClaimNext(ctx context.Context) (*model.Job, error) {
 		        OR (status='retrying' AND next_retry_at <= ?)
 		     ORDER BY created_at ASC LIMIT 1
 		 )
-		 RETURNING id, url, status, title, error, source, chat_id, created_at, updated_at, retry_count, next_retry_at, first_failed_at, COALESCE(tg_message_id,0)`,
+		 RETURNING `+jobColumnList,
 		now, now,
 	)
 	j, err := scanJob(row)
@@ -460,6 +316,12 @@ func (r *sqliteJobRepo) DeleteChecking(ctx context.Context, id string) error {
 	return err
 }
 
+// ListChecking возвращает задания, зависшие в статусе checking (проверка на плейлист
+// не завершилась из-за перезапуска). Их разворачивание нужно запустить заново.
+func (r *sqliteJobRepo) ListChecking(ctx context.Context) ([]*model.Job, error) {
+	return r.List(ctx, JobFilter{Statuses: []model.JobStatus{model.JobChecking}})
+}
+
 func (r *sqliteJobRepo) ResetFailed(ctx context.Context, id string) error {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE jobs SET status='pending', error='', retry_count=0, next_retry_at=NULL, first_failed_at=NULL, updated_at=?
@@ -502,35 +364,36 @@ func (r *sqliteJobRepo) Unhide(ctx context.Context, id string) error {
 	return err
 }
 
+// ResetStale возвращает в очередь задания, оборванные рестартом.
+// Статус checking не трогаем: такое задание не прошло проверку на плейлист,
+// и перевод его в pending скачал бы плейлист одним заданием. Их перезапускает
+// очередь через ListChecking.
 func (r *sqliteJobRepo) ResetStale(ctx context.Context) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE jobs SET status='pending', updated_at=? WHERE status IN ('running','checking')`,
+		`UPDATE jobs SET status='pending', updated_at=? WHERE status='running'`,
 		time.Now().UTC().Format(time.RFC3339Nano),
 	)
 	return err
 }
 
+// Purge безвозвратно удаляет скрытое задание вместе с его элементами.
+// Незакрытые (не скрытые) задания не трогаются: раньше items удалялись до
+// проверки hidden, и у обычного задания пропадали записи о файлах.
 func (r *sqliteJobRepo) Purge(ctx context.Context, id string) error {
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM items WHERE job_id=?`, id); err != nil {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id=? AND hidden=1`, id)
+	if err != nil {
 		return err
 	}
-	_, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id=? AND hidden=1`, id)
-	return err
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("job %s not found or not hidden", id)
+	}
+	// items и job_tags уходят каскадом по внешнему ключу.
+	return nil
 }
 
 func (r *sqliteJobRepo) CleanupDead(ctx context.Context) (int, error) {
-	if _, err := r.db.ExecContext(ctx, `
-		DELETE FROM items WHERE job_id IN (
-			SELECT id FROM jobs WHERE hidden=1 OR status='failed'
-		)`); err != nil {
-		return 0, err
-	}
-	if _, err := r.db.ExecContext(ctx, `
-		DELETE FROM job_tags WHERE job_id IN (
-			SELECT id FROM jobs WHERE hidden=1 OR status='failed'
-		)`); err != nil {
-		return 0, err
-	}
+	// items и job_tags удаляются каскадом.
 	res, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE hidden=1 OR status='failed'`)
 	if err != nil {
 		return 0, err
@@ -566,14 +429,16 @@ func scanJob(s scanner) (*model.Job, error) {
 	var j model.Job
 	var createdAt, updatedAt string
 	var nextRetryAt, firstFailedAt sql.NullString
+	var hidden int
 	err := s.Scan(
 		&j.ID, &j.URL, &j.Status, &j.Title, &j.Error,
 		&j.Source, &j.ChatID, &createdAt, &updatedAt,
-		&j.RetryCount, &nextRetryAt, &firstFailedAt, &j.TgMessageID,
+		&j.RetryCount, &nextRetryAt, &firstFailedAt, &j.TgMessageID, &hidden,
 	)
 	if err != nil {
 		return nil, err
 	}
+	j.Hidden = hidden != 0
 	j.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	j.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
 	if nextRetryAt.Valid && nextRetryAt.String != "" {
