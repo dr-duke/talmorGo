@@ -3,13 +3,14 @@ package worker
 import (
 	"context"
 	"log/slog"
-	"os"
 	"time"
 
+	"github.com/dr-duke/talmorGo/internal/filecheck"
 	"github.com/dr-duke/talmorGo/internal/repo"
 )
 
 // FileChecker периодически проверяет, что медиаэлементы присутствуют на диске.
+// Сама сверка живёт в пакете filecheck — её же вызывает операция reindex.
 type FileChecker struct {
 	items    repo.ItemRepo
 	interval time.Duration
@@ -23,6 +24,10 @@ func NewFileChecker(items repo.ItemRepo, intervalSec int) *FileChecker {
 }
 
 func (c *FileChecker) Start(ctx context.Context) {
+	if c.interval <= 0 {
+		slog.Info("checker: disabled")
+		return
+	}
 	c.check(ctx)
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
@@ -37,32 +42,10 @@ func (c *FileChecker) Start(ctx context.Context) {
 }
 
 func (c *FileChecker) check(ctx context.Context) {
-	items, err := c.items.ListAll(ctx)
+	lost, found, err := filecheck.Run(ctx, c.items)
 	if err != nil {
-		slog.Error("checker: list items", "err", err)
+		slog.Error("checker: scan", "err", err)
 		return
-	}
-	lost, found := 0, 0
-	for _, item := range items {
-		if item.IsDeleted() {
-			continue
-		}
-		_, statErr := os.Stat(item.Path)
-		missing := os.IsNotExist(statErr)
-
-		if missing && !item.IsLost() {
-			if err := c.items.MarkLost(ctx, item.ID); err != nil {
-				slog.Error("checker: mark lost", "id", item.ID, "err", err)
-			} else {
-				lost++
-			}
-		} else if !missing && item.IsLost() {
-			if err := c.items.MarkFound(ctx, item.ID); err != nil {
-				slog.Error("checker: mark found", "id", item.ID, "err", err)
-			} else {
-				found++
-			}
-		}
 	}
 	if lost > 0 || found > 0 {
 		slog.Info("checker: scan complete", "lost", lost, "found", found)

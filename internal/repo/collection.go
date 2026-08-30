@@ -7,16 +7,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dr-duke/talmorGo/internal/db"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/google/uuid"
 )
 
 type sqliteCollectionRepo struct {
-	db *sql.DB
+	db *db.DB
 }
 
-func NewCollectionRepo(db *sql.DB) CollectionRepo {
-	return &sqliteCollectionRepo{db: db}
+func NewCollectionRepo(database *db.DB) CollectionRepo {
+	return &sqliteCollectionRepo{db: database}
 }
 
 func (r *sqliteCollectionRepo) List(ctx context.Context) ([]*model.Collection, error) {
@@ -55,33 +56,49 @@ func (r *sqliteCollectionRepo) Create(ctx context.Context, name string) (*model.
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO collections (id, name, created_at) VALUES (?, ?, ?)`,
 		c.ID, c.Name, c.CreatedAt.Format(time.RFC3339Nano))
-	return c, err
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
+// Delete удаляет коллекцию вместе с её тегом и привязками — одной транзакцией,
+// чтобы частичный сбой не оставил осиротевшие job_tags.
 func (r *sqliteCollectionRepo) Delete(ctx context.Context, id string) error {
-	var name string
-	if err := r.db.QueryRowContext(ctx, `SELECT name FROM collections WHERE id=?`, id).Scan(&name); err != nil {
-		return fmt.Errorf("collection %s not found", id)
-	}
-	// Remove tag assignments for this collection name.
-	r.db.ExecContext(ctx, `DELETE FROM job_tags WHERE tag_id = (SELECT id FROM tags WHERE name=?)`, name) //nolint:errcheck
-	// Remove the tag itself.
-	r.db.ExecContext(ctx, `DELETE FROM tags WHERE name=?`, name) //nolint:errcheck
-	_, err := r.db.ExecContext(ctx, `DELETE FROM collections WHERE id=?`, id)
-	return err
+	return r.inTx(ctx, func(tx *sql.Tx) error {
+		var name string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM collections WHERE id=?`, id).Scan(&name); err != nil {
+			return fmt.Errorf("collection %s not found", id)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM job_tags WHERE tag_id = (SELECT id FROM tags WHERE name=?)`, name); err != nil {
+			return fmt.Errorf("delete collection assignments: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM tags WHERE name=?`, name); err != nil {
+			return fmt.Errorf("delete collection tag: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM collections WHERE id=?`, id); err != nil {
+			return fmt.Errorf("delete collection: %w", err)
+		}
+		return nil
+	})
 }
 
+// Rename переименовывает коллекцию и её тег, сохраняя привязки заданий.
 func (r *sqliteCollectionRepo) Rename(ctx context.Context, id, newName string) error {
-	var oldName string
-	if err := r.db.QueryRowContext(ctx, `SELECT name FROM collections WHERE id=?`, id).Scan(&oldName); err != nil {
-		return fmt.Errorf("collection %s not found", id)
-	}
-	if _, err := r.db.ExecContext(ctx, `UPDATE collections SET name=? WHERE id=?`, newName, id); err != nil {
-		return err
-	}
-	// Rename the backing tag so existing assignments follow the new name.
-	r.db.ExecContext(ctx, `UPDATE tags SET name=? WHERE name=?`, newName, oldName) //nolint:errcheck
-	return nil
+	return r.inTx(ctx, func(tx *sql.Tx) error {
+		var oldName string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM collections WHERE id=?`, id).Scan(&oldName); err != nil {
+			return fmt.Errorf("collection %s not found", id)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE collections SET name=? WHERE id=?`, newName, id); err != nil {
+			return fmt.Errorf("rename collection: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE tags SET name=? WHERE name=?`, newName, oldName); err != nil {
+			return fmt.Errorf("rename collection tag: %w", err)
+		}
+		return nil
+	})
 }
 
 // AddJobs связывает набор заданий с коллекцией через тег (имя коллекции = имя тега).
@@ -89,29 +106,47 @@ func (r *sqliteCollectionRepo) AddJobs(ctx context.Context, collectionID string,
 	if len(jobIDs) == 0 {
 		return nil
 	}
-	var name string
-	if err := r.db.QueryRowContext(ctx, `SELECT name FROM collections WHERE id=?`, collectionID).Scan(&name); err != nil {
-		return fmt.Errorf("collection %s not found", collectionID)
-	}
+	return r.inTx(ctx, func(tx *sql.Tx) error {
+		var name string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM collections WHERE id=?`, collectionID).Scan(&name); err != nil {
+			return fmt.Errorf("collection %s not found", collectionID)
+		}
 
-	// Upsert tag.
-	newID := uuid.NewString()
-	r.db.ExecContext(ctx, `INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)`, newID, name) //nolint:errcheck
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO tags (id, name, kind) VALUES (?, ?, 'collection')
+			 ON CONFLICT(name) DO UPDATE SET kind='collection'`,
+			uuid.NewString(), name); err != nil {
+			return fmt.Errorf("upsert collection tag: %w", err)
+		}
 
-	var tagID string
-	if err := r.db.QueryRowContext(ctx, `SELECT id FROM tags WHERE name=?`, name).Scan(&tagID); err != nil {
-		return fmt.Errorf("tag lookup failed: %w", err)
-	}
+		var tagID string
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM tags WHERE name=?`, name).Scan(&tagID); err != nil {
+			return fmt.Errorf("tag lookup failed: %w", err)
+		}
 
-	// Bulk insert into job_tags.
-	placeholders := make([]string, len(jobIDs))
-	args := make([]any, 0, len(jobIDs)*2)
-	for i, jid := range jobIDs {
-		placeholders[i] = "(?, ?)"
-		args = append(args, jid, tagID)
+		placeholders := make([]string, len(jobIDs))
+		args := make([]any, 0, len(jobIDs)*2)
+		for i, jid := range jobIDs {
+			placeholders[i] = "(?, ?)"
+			args = append(args, jid, tagID)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO job_tags (job_id, tag_id) VALUES `+strings.Join(placeholders, ","),
+			args...); err != nil {
+			return fmt.Errorf("assign jobs to collection: %w", err)
+		}
+		return nil
+	})
+}
+
+func (r *sqliteCollectionRepo) inTx(ctx context.Context, fn func(*sql.Tx) error) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	_, err := r.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO job_tags (job_id, tag_id) VALUES `+strings.Join(placeholders, ","),
-		args...)
-	return err
+	defer tx.Rollback() //nolint:errcheck
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

@@ -2,19 +2,19 @@ package repo
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 
+	"github.com/dr-duke/talmorGo/internal/db"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/google/uuid"
 )
 
 type sqliteTagRepo struct {
-	db *sql.DB
+	db *db.DB
 }
 
-func NewTagRepo(db *sql.DB) TagRepo {
-	return &sqliteTagRepo{db: db}
+func NewTagRepo(database *db.DB) TagRepo {
+	return &sqliteTagRepo{db: database}
 }
 
 // Upsert возвращает существующий тег или создаёт новый.
@@ -70,70 +70,11 @@ func (r *sqliteTagRepo) RemoveFromJob(ctx context.Context, jobID, tagName string
 	return err
 }
 
-func (r *sqliteTagRepo) ListWithCount(ctx context.Context) ([]*model.TagWithCount, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT t.name, COUNT(j.id) AS cnt,
-		       CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END AS is_coll
-		FROM tags t
-		LEFT JOIN job_tags jt ON jt.tag_id = t.id
-		LEFT JOIN jobs j ON j.id = jt.job_id AND j.hidden = 0
-		LEFT JOIN collections c ON c.name = t.name
-		GROUP BY t.id
-		HAVING cnt > 0 OR t.kind = 'collection'
-		ORDER BY is_coll DESC, cnt DESC, t.name ASC
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*model.TagWithCount
-	for rows.Next() {
-		var tw model.TagWithCount
-		var isCol int
-		if err := rows.Scan(&tw.Name, &tw.Count, &isCol); err != nil {
-			return nil, err
-		}
-		tw.IsCollection = isCol == 1
-		out = append(out, &tw)
-	}
-	return out, rows.Err()
-}
-
+// ListWithCountFiltered возвращает облако тегов для текущего фильтра медиатеки.
+// Учитываются текстовый поиск, выбранные теги и тип файла: на вкладке «Аудио»
+// счётчики считаются только по заданиям с аудиофайлами.
 func (r *sqliteTagRepo) ListWithCountFiltered(ctx context.Context, f model.MediaFilter) ([]*model.TagWithCount, error) {
-	if f.Query == "" && len(f.Tags) == 0 {
-		return r.ListWithCount(ctx)
-	}
-
-	var conds []string
-	var args []any
-
-	if f.Query != "" {
-		like := "%" + f.Query + "%"
-		conds = append(conds, "(j.url LIKE ? OR j.title LIKE ?)")
-		args = append(args, like, like)
-	}
-	for _, tag := range f.Tags {
-		conds = append(conds, `j.id IN (SELECT jt2.job_id FROM job_tags jt2 JOIN tags t2 ON t2.id=jt2.tag_id WHERE t2.name=?)`)
-		args = append(args, tag)
-	}
-
-	where := "WHERE j.hidden=0"
-	if len(conds) > 0 {
-		where += " AND " + strings.Join(conds, " AND ")
-	}
-
-	q := `
-		SELECT t.name, COUNT(DISTINCT j.id) AS cnt,
-		       CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END AS is_coll
-		FROM tags t
-		JOIN job_tags jt ON jt.tag_id = t.id
-		JOIN jobs j ON j.id = jt.job_id
-		LEFT JOIN collections c ON c.name = t.name
-		` + where + `
-		GROUP BY t.id
-		HAVING cnt > 0
-		ORDER BY is_coll DESC, cnt DESC, t.name ASC
-	`
+	q, args := buildTagCountQuery(f)
 	rows, err := r.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err

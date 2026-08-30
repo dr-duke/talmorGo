@@ -8,31 +8,38 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/dr-duke/talmorGo/internal/config"
-	"github.com/dr-duke/talmorGo/internal/playlist"
+	"github.com/dr-duke/talmorGo/internal/queue"
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/worker"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-type Enqueuer interface {
-	Enqueue()
+// messenger — часть Telegram API, которой пользуется бот при отправке.
+// Интерфейс позволяет проверять разбор команд и сценарии сообщений без сети.
+type messenger interface {
+	Send(c tgbotapi.Chattable) (tgbotapi.Message, error)
+	Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error)
 }
 
 type Bot struct {
-	cfg      *config.Config
-	api      *tgbotapi.BotAPI
-	jobs     repo.JobRepo
-	tokens   repo.TokenRepo
-	items    repo.ItemRepo
-	tags     repo.TagRepo
-	settings repo.SettingsRepo
-	pool     Enqueuer
-	expander *playlist.Expander
+	cfg    *config.Config
+	api    messenger
+	poller *tgbotapi.BotAPI // источник обновлений; в тестах не нужен
+	jobs   repo.JobRepo
+	tokens repo.TokenRepo
+	queue  *queue.Service
+
+	// pendingMsgs хранит id сообщения «в очереди» по id задания-заготовки:
+	// если ссылка окажется плейлистом, заготовка удаляется вместе с job_id,
+	// и заменить сообщение сводкой можно только по этой связке.
+	mu          sync.Mutex
+	pendingMsgs map[string]int64
 }
 
-func New(cfg *config.Config, jobs repo.JobRepo, items repo.ItemRepo, tokens repo.TokenRepo, tags repo.TagRepo, pool Enqueuer, settings repo.SettingsRepo) (*Bot, error) {
+func New(cfg *config.Config, jobs repo.JobRepo, tokens repo.TokenRepo, q *queue.Service) (*Bot, error) {
 	var httpClient *http.Client
 	if cfg.TelegramProxy != "" {
 		proxyURL, err := url.Parse(cfg.TelegramProxy)
@@ -59,12 +66,27 @@ func New(cfg *config.Config, jobs repo.JobRepo, items repo.ItemRepo, tokens repo
 	slog.Info("bot: authorized", "username", api.Self.UserName)
 
 	b := &Bot{
-		cfg: cfg, api: api, jobs: jobs, items: items, tokens: tokens, tags: tags,
-		settings: settings, pool: pool,
-		expander: playlist.New(jobs, tags),
+		cfg: cfg, api: api, poller: api, jobs: jobs, tokens: tokens, queue: q,
+		pendingMsgs: make(map[string]int64),
 	}
 	b.setCommands()
 	return b, nil
+}
+
+// rememberPending связывает задание-заготовку с отправленным сообщением.
+func (b *Bot) rememberPending(jobID string, msgID int64) {
+	b.mu.Lock()
+	b.pendingMsgs[jobID] = msgID
+	b.mu.Unlock()
+}
+
+// takePending возвращает и забывает id сообщения для задания-заготовки.
+func (b *Bot) takePending(jobID string) (int64, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	msgID, ok := b.pendingMsgs[jobID]
+	delete(b.pendingMsgs, jobID)
+	return msgID, ok
 }
 
 func (b *Bot) setCommands() {
@@ -206,16 +228,19 @@ func (b *Bot) isPublic() bool {
 
 // Start запускает long polling и блокируется до отмены ctx.
 func (b *Bot) Start(ctx context.Context) {
+	if b.poller == nil {
+		return
+	}
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 20
 
-	updates := b.api.GetUpdatesChan(u)
+	updates := b.poller.GetUpdatesChan(u)
 	slog.Info("bot: started polling")
 
 	for {
 		select {
 		case <-ctx.Done():
-			b.api.StopReceivingUpdates()
+			b.poller.StopReceivingUpdates()
 			slog.Info("bot: stopped")
 			return
 		case update, ok := <-updates:

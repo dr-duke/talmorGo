@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,13 +14,14 @@ import (
 	"github.com/dr-duke/talmorGo/internal/downloader"
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/internal/settings"
 	"github.com/dr-duke/talmorGo/internal/sse"
 )
 
 type NotifKind uint8
 
 const (
-	NotifJobStarted  NotifKind = iota
+	NotifJobStarted NotifKind = iota
 	NotifFileDone
 	NotifJobDone
 	NotifJobFailed
@@ -45,16 +44,40 @@ type Notifier interface {
 	Notify(ctx context.Context, n Notification)
 }
 
+// Downloader запускает загрузку и отдаёт поток событий.
+// Вынесен в интерфейс, чтобы пул можно было проверять без внешнего бинаря:
+// backoff, отмена и перенос файлов — самая дефектоёмкая часть кода.
+type Downloader interface {
+	Run(ctx context.Context, url string, opts downloader.Options) <-chan downloader.Event
+}
+
+type ytdlpDownloader struct{}
+
+func (ytdlpDownloader) Run(ctx context.Context, url string, opts downloader.Options) <-chan downloader.Event {
+	return downloader.Run(ctx, url, opts)
+}
+
+// Clock — источник времени. Подменяется в тестах, чтобы проверять расписание повторов.
+type Clock interface {
+	Now() time.Time
+}
+
+type realClock struct{}
+
+func (realClock) Now() time.Time { return time.Now() }
+
 type Pool struct {
-	cfg          *config.Config
-	jobRepo      repo.JobRepo
-	itemRepo     repo.ItemRepo
-	tokenRepo    repo.TokenRepo
-	settingsRepo repo.SettingsRepo
-	notifier     Notifier
-	notify       chan struct{}
-	inFlight     *InFlightPaths
-	hub          *sse.Hub
+	cfg       *config.Config
+	jobRepo   repo.JobRepo
+	itemRepo  repo.ItemRepo
+	tokenRepo repo.TokenRepo
+	settings  *settings.Provider
+	notifier  Notifier
+	notify    chan struct{}
+	inFlight  *InFlightPaths
+	hub       *sse.Hub
+	dl        Downloader
+	clock     Clock
 
 	mu          sync.Mutex
 	cancelFuncs map[string]context.CancelFunc
@@ -70,15 +93,21 @@ func NewPool(cfg *config.Config, jobRepo repo.JobRepo, itemRepo repo.ItemRepo, t
 		notify:      make(chan struct{}, cfg.WorkerCount),
 		cancelFuncs: make(map[string]context.CancelFunc),
 		inFlight:    NewInFlightPaths(),
+		dl:          ytdlpDownloader{},
+		clock:       realClock{},
 	}
 }
 
-func (p *Pool) SetHub(h *sse.Hub)                    { p.hub = h }
-func (p *Pool) SetSettingsRepo(sr repo.SettingsRepo) { p.settingsRepo = sr }
+func (p *Pool) SetHub(h *sse.Hub)                { p.hub = h }
+func (p *Pool) SetSettings(s *settings.Provider) { p.settings = s }
+func (p *Pool) SetDownloader(d Downloader)       { p.dl = d }
+func (p *Pool) SetClock(c Clock)                 { p.clock = c }
 
-func (p *Pool) broadcast() {
+// publish уведомляет браузер об изменениях. Загрузка всегда меняет и очередь,
+// и медиатеку: строка задания живёт в обоих списках.
+func (p *Pool) publish() {
 	if p.hub != nil {
-		p.hub.Broadcast()
+		p.hub.Publish(sse.TopicQueue, sse.TopicLibrary)
 	}
 }
 
@@ -184,11 +213,11 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		delete(p.cancelFuncs, job.ID)
 		p.mu.Unlock()
 		cancel()
-		p.broadcast()
+		p.publish()
 	}()
 
 	slog.Info("worker: processing job", "id", job.ID, "url", job.URL, "attempt", job.RetryCount+1)
-	p.broadcast()
+	p.publish()
 
 	if p.tgJob(job) {
 		p.notifier.Notify(ctx, Notification{
@@ -208,13 +237,13 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 	}
 	defer os.RemoveAll(jobStaging)
 
-	opts := p.resolveOpts(ctx, jobStaging)
+	opts := p.settings.DownloadOptions(ctx, jobStaging)
 
 	var firstItem *model.Item
 	var lastErr error
 	fileCount := 0
 
-	for event := range downloader.Run(jobCtx, job.URL, opts) {
+	for event := range p.dl.Run(jobCtx, job.URL, opts) {
 		if event.Log != "" {
 			if err := p.jobRepo.SaveLog(ctx, job.ID, event.Log); err != nil {
 				slog.Warn("worker: save log", "job", job.ID, "err", err)
@@ -261,7 +290,7 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		}
 		p.inFlight.Remove(finalPath)
 		slog.Info("worker: item saved", "name", item.Name, "id", item.ID)
-		p.broadcast()
+		p.publish()
 		fileCount++
 		if firstItem == nil {
 			firstItem = item
@@ -316,7 +345,7 @@ func (p *Pool) handleFailure(ctx context.Context, job *model.Job, lastErr error)
 	maxDuration := time.Duration(p.cfg.RetryMaxDuration) * time.Second
 	base := time.Duration(p.cfg.RetryBackoffBase) * time.Second
 
-	now := time.Now()
+	now := p.clock.Now()
 	firstFailed := now
 	if job.FirstFailedAt != nil {
 		firstFailed = *job.FirstFailedAt
@@ -371,57 +400,6 @@ func (p *Pool) handleFailure(ctx context.Context, job *model.Job, lastErr error)
 			RetryAt:   retryIn,
 		})
 	}
-}
-
-func (p *Pool) resolveOpts(ctx context.Context, outputDir string) downloader.Options {
-	proxy := p.cfg.YtDlpProxy
-	outputFormat := p.cfg.YtDlpOutputFormat
-	maxFiles := p.cfg.YtDlpMaxFilesPerRequest
-	timeout := time.Duration(p.cfg.YtDlpTimeout) * time.Second
-	extraArgs := p.cfg.ExtraArgsList()
-
-	if p.settingsRepo != nil {
-		if v, _ := p.settingsRepo.Get(ctx, "yt_dlp_proxy"); v != "" {
-			proxy = v
-		}
-		if v, _ := p.settingsRepo.Get(ctx, "yt_dlp_output_format"); v != "" {
-			outputFormat = v
-		}
-		if v, _ := p.settingsRepo.Get(ctx, "yt_dlp_max_files"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				maxFiles = n
-			}
-		}
-		if v, _ := p.settingsRepo.Get(ctx, "yt_dlp_timeout"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				timeout = time.Duration(n) * time.Second
-			}
-		}
-		if v, _ := p.settingsRepo.Get(ctx, "yt_dlp_extra_args"); v != "" {
-			extraArgs = strings.Fields(v)
-		}
-	}
-
-	cookiesFile := ""
-	if cf := p.cfg.CookiesFilePath(); fileExists(cf) {
-		cookiesFile = cf
-	}
-
-	return downloader.Options{
-		Binary:       p.cfg.YtDlpBinary,
-		OutputDir:    outputDir,
-		OutputFormat: outputFormat,
-		Proxy:        proxy,
-		Timeout:      timeout,
-		MaxFiles:     maxFiles,
-		ExtraArgs:    extraArgs,
-		CookiesFile:  cookiesFile,
-	}
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 func formatDuration(d time.Duration) string {

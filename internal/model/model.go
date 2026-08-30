@@ -13,8 +13,9 @@ var ytdlpID = regexp.MustCompile(`\s*\[[A-Za-z0-9_-]{6,15}\](\.[^.]+)$`)
 // ytdlpFmt matches yt-dlp format codes in filenames, e.g. ".f140" before the extension.
 var ytdlpFmt = regexp.MustCompile(`\.f\d{3,4}(\.[^.]+)$`)
 
-// cleanFileName strips yt-dlp artifacts (video IDs, format codes) from file names.
-func cleanFileName(name string) string {
+// CleanFileName убирает из имени файла артефакты yt-dlp: идентификатор ролика
+// («… [dQw4w9WgXcQ].mp4») и код формата («….f140.mp4»).
+func CleanFileName(name string) string {
 	strip := func(s string, m []int) string {
 		ext := s[m[2]:]
 		base := strings.TrimRight(s[:m[0]], " \t")
@@ -32,7 +33,7 @@ func cleanFileName(name string) string {
 type JobStatus string
 
 const (
-	JobChecking  JobStatus = "checking"  // yt-dlp проверяет, не плейлист ли URL
+	JobChecking  JobStatus = "checking" // yt-dlp проверяет, не плейлист ли URL
 	JobPending   JobStatus = "pending"
 	JobRunning   JobStatus = "running"
 	JobRetrying  JobStatus = "retrying"
@@ -130,7 +131,7 @@ func (i *Item) IsVideo() bool     { return i.Kind == "video" }
 // MediaItem — объединённое представление задания и (опционально) медиаэлемента.
 type MediaItem struct {
 	Job  *Job
-	Item *Item  // nil пока файл не скачан
+	Item *Item // nil пока файл не скачан
 	Tags []string
 }
 
@@ -151,7 +152,7 @@ func (m *MediaItem) EffectiveStatus() string {
 // DisplayTitle возвращает имя файла или заголовок задания.
 func (m *MediaItem) DisplayTitle() string {
 	if m.Item != nil && m.Item.IsAvailable() {
-		return cleanFileName(m.Item.Name)
+		return CleanFileName(m.Item.Name)
 	}
 	if m.Job.Title != "" {
 		return m.Job.Title
@@ -185,26 +186,29 @@ type Tag struct {
 }
 
 // Collection — именованная коллекция (имя совпадает с именем тега kind='collection').
+// Теги json заданы явно: структура уходит в браузер, и клиентский код не должен
+// зависеть от умолчаний сериализации Go.
 type Collection struct {
-	ID        string
-	Name      string
-	CreatedAt time.Time
-	ItemCount int // заполняется репозиторием
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+	ItemCount int       `json:"item_count"` // заполняется репозиторием
 }
 
 // TagWithCount — тег с количеством привязанных заданий.
 type TagWithCount struct {
-	Name         string
-	Count        int
-	IsCollection bool
+	Name         string `json:"name"`
+	Count        int    `json:"count"`
+	IsCollection bool   `json:"is_collection"`
 }
 
 // MediaFilter — параметры серверной фильтрации медиатеки.
 type MediaFilter struct {
-	Query string   // текстовый поиск (имя файла, URL, заголовок)
-	Kind  string   // "" | "video" | "audio"
-	Tags  []string // AND-пересечение тегов (включая коллекции)
-	Limit int      // максимум строк; 0 = без ограничений
+	Query  string   // текстовый поиск (имя файла, URL, заголовок, теги)
+	Kind   string   // "" | "video" | "audio"
+	Tags   []string // AND-пересечение тегов (включая коллекции)
+	Limit  int      // максимум строк; 0 = без ограничений
+	Offset int      // сдвиг для постраничной догрузки; учитывается только при Limit > 0
 }
 
 // CookieRecord — куки одного домена (Netscape-формат).

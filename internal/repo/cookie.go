@@ -2,19 +2,19 @@ package repo
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"time"
 
+	"github.com/dr-duke/talmorGo/internal/db"
 	"github.com/dr-duke/talmorGo/internal/model"
 )
 
 type sqliteCookieRepo struct {
-	db *sql.DB
+	db *db.DB
 }
 
-func NewCookieRepo(db *sql.DB) CookieRepo {
-	return &sqliteCookieRepo{db: db}
+func NewCookieRepo(database *db.DB) CookieRepo {
+	return &sqliteCookieRepo{db: database}
 }
 
 func (r *sqliteCookieRepo) Upsert(ctx context.Context, domain, content string) error {

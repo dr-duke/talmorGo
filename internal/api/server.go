@@ -9,10 +9,11 @@ import (
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/api/handler"
 	"github.com/dr-duke/talmorGo/internal/config"
-	"github.com/dr-duke/talmorGo/internal/playlist"
+	"github.com/dr-duke/talmorGo/internal/library"
+	"github.com/dr-duke/talmorGo/internal/queue"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/internal/settings"
 	"github.com/dr-duke/talmorGo/internal/sse"
-	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/dr-duke/talmorGo/web"
 	"github.com/dr-duke/talmorGo/web/templates"
 )
@@ -22,73 +23,74 @@ type Server struct {
 	handler http.Handler
 }
 
-func New(
-	cfg *config.Config,
-	jobs repo.JobRepo,
-	items repo.ItemRepo,
-	tokens repo.TokenRepo,
-	tags repo.TagRepo,
-	cookies repo.CookieRepo,
-	settings repo.SettingsRepo,
-	collections repo.CollectionRepo,
-	operations repo.OperationRepo,
-	store *storage.Storage,
-	pool handler.Enqueuer,
-	opsWorker handler.OpsEnqueuer,
-	hub *sse.Hub,
-) *Server {
+// Deps — всё, что нужно HTTP-слою. Доменная логика живёт в сервисах,
+// репозитории сюда попадают только там, где адаптер и есть вся работа (куки).
+type Deps struct {
+	Cfg      *config.Config
+	Lib      *library.Service
+	Queue    *queue.Service
+	Settings *settings.Provider
+	Cookies  repo.CookieRepo
+	Hub      *sse.Hub
+}
+
+func New(d Deps) *Server {
+	cfg := d.Cfg
 	basePath := strings.TrimRight(cfg.BasePath, "/")
-	siteName := cfg.SiteName
 
 	mux := http.NewServeMux()
 
-	expander := playlist.New(jobs, tags)
-	expander.Hub = hub
-
-	qh := &handler.QueueHandler{Jobs: jobs, Tags: tags, Ops: operations, Pool: pool, Cfg: cfg, Settings: settings, Expander: expander}
-	mh := &handler.MediaHandler{
-		Jobs: jobs, Items: items, Tags: tags,
-		Tokens: tokens, Storage: store,
-		BaseURL: cfg.BaseURL, Pool: pool, Cfg: cfg, Settings: settings,
-		Collections: collections, Expander: expander,
-		Ops: operations, OpsWorker: opsWorker,
+	mh := &handler.MediaHandler{Lib: d.Lib, Cfg: cfg}
+	qh := &handler.QueueHandler{Queue: d.Queue, Lib: d.Lib}
+	ch := &handler.CollectionHandler{Lib: d.Lib}
+	lh := &handler.LinkHandler{Lib: d.Lib}
+	sh := &handler.SettingsHandler{
+		Cookies: d.Cookies, Settings: d.Settings, Lib: d.Lib,
+		Cfg: cfg, SiteName: cfg.SiteName,
 	}
-	ch := &handler.CollectionHandler{Collections: collections}
-	lh := &handler.LinkHandler{Tokens: tokens, Items: items}
-	sh := &handler.SettingsHandler{Cookies: cookies, Settings: settings, Jobs: jobs, Items: items, Tags: tags, Storage: store, Cfg: cfg, SiteName: siteName, Ops: operations, OpsWorker: opsWorker}
+	ah := &handler.AuthHandler{Token: cfg.WebToken, BasePath: basePath, SiteName: cfg.SiteName}
 
 	// Статика.
 	staticSub, _ := fs.Sub(web.StaticFiles, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 
-	// Главная страница — рендерим с коллекциями для сайдбара.
+	// Главная страница.
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		cols, _ := collections.List(r.Context())
-		templ.Handler(templates.Index(basePath, siteName, cols)).ServeHTTP(w, r)
+		cols, _ := d.Lib.ListCollections(r.Context())
+		templ.Handler(templates.Index(basePath, cfg.SiteName, cols)).ServeHTTP(w, r)
 	})
 
-	// Медиатека: сайдбар, items, теги, плейлист.
+	// Вход по токену.
+	if cfg.WebToken != "" {
+		mux.HandleFunc("GET /login", ah.LoginPage)
+		mux.HandleFunc("POST /login", ah.Login)
+		mux.HandleFunc("POST /logout", ah.Logout)
+	}
+
+	// Медиатека.
 	mux.HandleFunc("GET /library/sidebar", mh.LibrarySidebar)
 	mux.HandleFunc("GET /library/items", mh.LibraryItems)
 	mux.HandleFunc("GET /library/tags", mh.TagsFragment)
 	mux.HandleFunc("GET /library/playlist", mh.PlaylistItems)
 
-	// Items: стриминг, удаление, переименование, ссылки, аудио.
+	// Элементы.
 	mux.HandleFunc("GET /items/{id}/stream", mh.Stream)
 	mux.HandleFunc("DELETE /items/{id}", mh.Delete)
 	mux.HandleFunc("PATCH /items/{id}", mh.Rename)
 	mux.HandleFunc("PATCH /items/{id}/meta", mh.UpdateMeta)
 	mux.HandleFunc("POST /items/meta-bulk", mh.BulkMeta)
 	mux.HandleFunc("POST /items/{id}/link", mh.CreateLink)
+	mux.HandleFunc("DELETE /items/{id}/link", mh.RevokeLink)
 	mux.HandleFunc("POST /items/{id}/extract-audio", mh.ExtractAudio)
+	mux.HandleFunc("POST /items/extract-audio-bulk", mh.ExtractAudioBulk)
 	mux.HandleFunc("GET /items/deleted", mh.ListDeleted)
 
-	// Jobs: управление заданиями.
-	mux.HandleFunc("POST /jobs/{id}/redownload", mh.Redownload)
+	// Задания.
+	mux.HandleFunc("POST /jobs/{id}/redownload", qh.Redownload)
 	mux.HandleFunc("POST /jobs/{id}/hide", mh.Hide)
 	mux.HandleFunc("POST /jobs/{id}/unhide", mh.Unhide)
 	mux.HandleFunc("DELETE /jobs/{id}", mh.PurgeJob)
@@ -99,8 +101,7 @@ func New(
 	mux.HandleFunc("POST /media/bulk-hide", mh.BulkHide)
 
 	// Коллекции.
-	mux.HandleFunc("GET /collections", ch.Fragment)
-	mux.HandleFunc("GET /collections/cards", ch.Cards)
+	mux.HandleFunc("GET /collections", ch.ListJSON)
 	mux.HandleFunc("POST /collections", ch.Create)
 	mux.HandleFunc("PATCH /collections/{id}", ch.Rename)
 	mux.HandleFunc("DELETE /collections/{id}", ch.Delete)
@@ -113,6 +114,7 @@ func New(
 	mux.HandleFunc("GET /queue/items", qh.Items)
 	mux.HandleFunc("POST /jobs/{id}/retry", qh.Retry)
 	mux.HandleFunc("DELETE /operations/{id}", qh.DismissOp)
+	mux.HandleFunc("POST /operations/{id}/cancel", qh.CancelOp)
 
 	// Настройки.
 	mux.HandleFunc("GET /settings", sh.Page)
@@ -123,36 +125,9 @@ func New(
 	mux.HandleFunc("POST /settings/runtime", sh.SaveRuntimeSettings)
 
 	// SSE.
-	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no")
+	mux.HandleFunc("GET /events", eventsHandler(d.Hub))
 
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-			return
-		}
-
-		ch, unsub := hub.Subscribe()
-		defer unsub()
-
-		fmt.Fprint(w, "event: ping\ndata: ok\n\n")
-		flusher.Flush()
-
-		for {
-			select {
-			case <-r.Context().Done():
-				return
-			case <-ch:
-				fmt.Fprint(w, "event: update\ndata: 1\n\n")
-				flusher.Flush()
-			}
-		}
-	})
-
-	// Presigned link (публичный).
+	// Постоянная ссылка (публичная).
 	mux.HandleFunc("GET /f/{token}", lh.Resolve)
 
 	// Health.
@@ -162,7 +137,7 @@ func New(
 
 	var h http.Handler = mux
 	if cfg.WebToken != "" {
-		h = authMiddleware(cfg.WebToken, mux)
+		h = authMiddleware(cfg.WebToken, cfg.HealthEndpoint, basePath, mux)
 	}
 
 	if basePath != "" {
@@ -184,9 +159,64 @@ func (s *Server) Handler() http.Handler {
 	return s.handler
 }
 
-func authMiddleware(token string, next http.Handler) http.Handler {
+func eventsHandler(hub *sse.Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		ch, unsub := hub.Subscribe()
+		defer unsub()
+
+		fmt.Fprint(w, "event: ping\ndata: ok\n\n")
+		flusher.Flush()
+
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case topics, ok := <-ch:
+				if !ok {
+					return
+				}
+				// Каждая тема — отдельное событие: браузер обновляет только её.
+				for _, t := range topics {
+					fmt.Fprintf(w, "event: %s\ndata: 1\n\n", t)
+				}
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+// publicPath — маршруты, доступные без авторизации: постоянные ссылки,
+// страница входа и статика, без которой эта страница не отрисуется.
+func publicPath(path, healthEndpoint string) bool {
+	switch {
+	case strings.HasPrefix(path, "/f/"),
+		strings.HasPrefix(path, "/static/"),
+		path == "/login":
+		return true
+	case healthEndpoint != "" && path == healthEndpoint:
+		return true
+	}
+	return false
+}
+
+// authMiddleware закрывает всё, кроме публичных маршрутов.
+// basePath нужен для редиректа: внутрь обработчика запрос приходит уже без
+// префикса, поэтому относительный «login» увёл бы за точку монтирования.
+func authMiddleware(token, healthEndpoint, basePath string, next http.Handler) http.Handler {
+	loginURL := basePath + "/login"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/f/") {
+		if publicPath(r.URL.Path, healthEndpoint) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -194,8 +224,13 @@ func authMiddleware(token string, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if c, err := r.Cookie("_auth"); err == nil && c.Value == token {
+		if c, err := r.Cookie(handler.AuthCookie); err == nil && c.Value == token {
 			next.ServeHTTP(w, r)
+			return
+		}
+		// Обычную навигацию отправляем на форму входа, запросы данных — 401.
+		if r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "text/html") {
+			http.Redirect(w, r, loginURL, http.StatusSeeOther)
 			return
 		}
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)

@@ -1,4 +1,5 @@
-// Package ops описывает виды фоновых пакетных операций и управляет их видимостью в очереди.
+// Package ops описывает виды фоновых пакетных операций, их видимость в очереди
+// и класс исполнения.
 package ops
 
 const (
@@ -10,6 +11,30 @@ const (
 	KindReindex      = "reindex"
 	KindCleanup      = "cleanup"
 )
+
+// ExtractedAudioTag — тег, которым помечается задание после извлечения дорожки:
+// по нему в медиатеке одним кликом видно, из чего аудио уже доставали.
+const ExtractedAudioTag = "аудио"
+
+// Класс операции определяет полосу исполнения. Лёгкие операции — только запись
+// в БД, они завершаются мгновенно; тяжёлые запускают ffmpeg или обходят весь
+// диск. Полосы независимы, поэтому «Извлечь аудио» больше не ждёт, пока
+// проставятся теги на две сотни файлов, и наоборот.
+const (
+	ClassLight = "light"
+	ClassHeavy = "heavy"
+)
+
+// Class сопоставляет вид операции с полосой исполнения.
+var Class = map[string]string{
+	KindBulkTag:      ClassLight,
+	KindBulkHide:     ClassLight,
+	KindBulkMeta:     ClassHeavy,
+	KindExtractAudio: ClassHeavy,
+	KindUpdateMeta:   ClassHeavy,
+	KindReindex:      ClassHeavy,
+	KindCleanup:      ClassHeavy,
+}
 
 // ShowInQueue управляет тем, отображается ли каждый вид операций в UI очереди.
 // Присвойте false, чтобы скрыть конкретный тип — операции будут по-прежнему выполняться.
@@ -29,6 +54,17 @@ func VisibleKinds() []string {
 	for k, visible := range ShowInQueue {
 		if visible {
 			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// KindsOfClass возвращает виды операций указанного класса.
+func KindsOfClass(class string) []string {
+	out := make([]string, 0, len(Class))
+	for kind, c := range Class {
+		if c == class {
+			out = append(out, kind)
 		}
 	}
 	return out

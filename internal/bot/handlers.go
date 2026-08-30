@@ -2,18 +2,17 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/dr-duke/talmorGo/internal/downloader"
 	"github.com/dr-duke/talmorGo/internal/model"
+	"github.com/dr-duke/talmorGo/internal/queue"
 	"github.com/dr-duke/talmorGo/internal/repo"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 func (b *Bot) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
@@ -52,7 +51,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 	case "last":
 		b.handleLast(ctx, msg.Chat.ID, msg.CommandArguments())
 	case "web":
-		b.send(msg.Chat.ID, "🌐 "+b.cfg.BaseURL)
+		b.send(msg.Chat.ID, "🌐 "+b.cfg.LinkBase())
 	default:
 		b.send(msg.Chat.ID, "Неизвестная команда. Отправь /help")
 	}
@@ -105,86 +104,46 @@ func (b *Bot) handleQueue(ctx context.Context, chatID int64) {
 		if j.Title != "" {
 			name = j.Title
 		}
-		sb.WriteString(fmt.Sprintf("%s <code>%s</code> %s\n", status, shortID, shortenURL(name)))
+		sb.WriteString(fmt.Sprintf("%s <code>%s</code> %s\n", status, shortID, escapeHTML(shortenURL(name))))
 	}
 	b.send(chatID, sb.String())
 }
 
-// resolveDownloaderOpts собирает параметры yt-dlp с учётом runtime-настроек из БД.
-func (b *Bot) resolveDownloaderOpts(ctx context.Context) downloader.Options {
-	proxy := b.cfg.YtDlpProxy
-	maxFiles := b.cfg.YtDlpMaxFilesPerRequest
-	timeout := time.Duration(b.cfg.YtDlpTimeout) * time.Second
-
-	if b.settings != nil {
-		if v, _ := b.settings.Get(ctx, "yt_dlp_proxy"); v != "" {
-			proxy = v
-		}
-		if v, _ := b.settings.Get(ctx, "yt_dlp_max_files"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				maxFiles = n
-			}
-		}
-		if v, _ := b.settings.Get(ctx, "yt_dlp_timeout"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				timeout = time.Duration(n) * time.Second
-			}
-		}
-	}
-	return downloader.Options{
-		Binary:   b.cfg.YtDlpBinary,
-		Proxy:    proxy,
-		MaxFiles: maxFiles,
-		Timeout:  timeout,
-	}
-}
-
+// handleURL ставит каждую присланную ссылку в очередь.
+// Проверка «плейлист или одиночное видео» идёт в фоне (сервис очереди), поэтому
+// обработчик сообщений больше не ждёт yt-dlp до сорока пяти секунд.
 func (b *Bot) handleURL(ctx context.Context, msg *tgbotapi.Message) {
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
 		return
 	}
 
-	dlOpts := b.resolveDownloaderOpts(ctx)
-
 	var added, invalid int
 	for _, part := range strings.Fields(text) {
-		if _, err := url.ParseRequestURI(part); err != nil {
-			invalid++
+		job, err := b.queue.Prepare(ctx, part, "telegram", msg.Chat.ID)
+		if err != nil {
+			if errors.Is(err, queue.ErrInvalidURL) {
+				invalid++
+			} else {
+				slog.Error("bot: prepare job", "url", part, "err", err)
+			}
 			continue
 		}
 
-		if info := downloader.FetchPlaylist(ctx, part, dlOpts); info != nil {
-			// Плейлист — создаём отдельный job на каждое видео.
-			n := b.createPlaylistJobs(ctx, msg.Chat.ID, part, info)
-			added += n
-		} else {
-			// Одиночное видео — текущее поведение с анимированным сообщением.
-			job := &model.Job{
-				URL:    part,
-				Status: model.JobPending,
-				Source: "telegram",
-				ChatID: msg.Chat.ID,
-			}
-			if err := b.jobs.Create(ctx, job); err != nil {
-				slog.Error("bot: create job", "err", err)
-				continue
-			}
-			stopKb := tgbotapi.NewInlineKeyboardMarkup(
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("🛑 Отменить", "stop:"+job.ID),
-				),
-			)
-			msgID := b.sendMarkup(msg.Chat.ID,
-				"⏳ <b>В очереди</b>\n"+escapeHTML(shortenMsg(part)),
-				&stopKb,
-			)
-			if msgID != 0 {
-				b.jobs.SetTgMessageID(ctx, job.ID, msgID) //nolint:errcheck
-			}
-			added++
+		stopKb := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🛑 Отменить", "stop:"+job.ID),
+			),
+		)
+		msgID := b.sendMarkup(msg.Chat.ID,
+			"⏳ <b>В очереди</b>\n"+escapeHTML(shortenMsg(part)), &stopKb)
+		if msgID != 0 {
+			b.rememberPending(job.ID, msgID)
+			b.jobs.SetTgMessageID(ctx, job.ID, msgID) //nolint:errcheck
 		}
-		b.pool.Enqueue()
+
+		b.queue.Resolve(job)
+		added++
 	}
 
 	if added == 0 {
@@ -194,23 +153,24 @@ func (b *Bot) handleURL(ctx context.Context, msg *tgbotapi.Message) {
 	}
 }
 
-// createPlaylistJobs разворачивает плейлист в отдельные задания (через общий Expander)
-// и отправляет одно сводное сообщение. Возвращает число созданных заданий.
-func (b *Bot) createPlaylistJobs(ctx context.Context, chatID int64, originalURL string, info *downloader.PlaylistInfo) int {
-	created := b.expander.CreateJobs(ctx, info, "telegram", chatID)
-	if created == 0 {
-		return 0
+// OnExpanded реализует queue.ExpandObserver: если ссылка оказалась плейлистом,
+// сообщение «в очереди» заменяется сводкой — отдельных заданий теперь много,
+// и кнопка отмены одного из них смысла не имеет.
+func (b *Bot) OnExpanded(ctx context.Context, ev queue.ExpandEvent) {
+	msgID, ok := b.takePending(ev.PlaceholderID)
+	if !ok || ev.ChatID == 0 || !ev.IsPlaylist {
+		return
 	}
 
-	// Одно сводное сообщение вместо N отдельных.
-	title := info.PlaylistTitle
+	title := ev.PlaylistTitle
 	if title == "" {
-		title = shortenMsg(originalURL)
+		title = shortenMsg(ev.URL)
 	}
-	text := fmt.Sprintf("📋 <b>%s</b>\n⏳ Добавлено в очередь: <b>%d</b> видео",
-		escapeHTML(title), created)
-	b.send(chatID, text)
-	return created
+	b.editMsg(ev.ChatID, int(msgID),
+		fmt.Sprintf("📋 <b>%s</b>\n⏳ Добавлено в очередь: <b>%d</b> видео",
+			escapeHTML(title), ev.Created),
+		tgbotapi.NewInlineKeyboardMarkup(),
+	)
 }
 
 // handleCallback обрабатывает нажатие inline-кнопок.
@@ -240,28 +200,25 @@ func (b *Bot) handleCallback(ctx context.Context, cq *tgbotapi.CallbackQuery) {
 		b.answerCallback(cq.ID, "Ссылка отправлена")
 
 	case strings.HasPrefix(data, "stop:"):
-		// Мягкая отмена: статус cancelled, URL сохраняется в БД.
 		jobID := strings.TrimPrefix(data, "stop:")
-		if err := b.jobs.Cancel(ctx, jobID); err != nil {
-			b.answerCallback(cq.ID, "⚠️ Нельзя отменить — задание уже выполняется")
+		if err := b.queue.Cancel(ctx, jobID); err != nil {
+			b.answerCallback(cq.ID, "⚠️ Не удалось отменить задание")
 			return
 		}
 		b.answerCallback(cq.ID, "🛑 Задача отменена")
 		b.deleteMsg(chatID, cq.Message.MessageID)
 
 	case strings.HasPrefix(data, "retry:"):
-		// Сбрасываем failed-задачу в pending, редактируем сообщение в «очередь».
 		jobID := strings.TrimPrefix(data, "retry:")
 		job, err := b.jobs.GetByID(ctx, jobID)
 		if err != nil {
 			b.answerCallback(cq.ID, "Ошибка: задание не найдено")
 			return
 		}
-		if err := b.jobs.ResetFailed(ctx, jobID); err != nil {
+		if err := b.queue.Retry(ctx, jobID); err != nil {
 			b.answerCallback(cq.ID, "Ошибка: "+err.Error())
 			return
 		}
-		b.pool.Enqueue()
 		b.answerCallback(cq.ID, "⏳ Добавлено в очередь")
 		stopKb := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
@@ -281,7 +238,7 @@ func (b *Bot) handleCallback(ctx context.Context, cq *tgbotapi.CallbackQuery) {
 func (b *Bot) handleSearch(ctx context.Context, chatID int64, args string) {
 	q := strings.TrimSpace(args)
 	if q == "" {
-		b.send(chatID, "Использование: /search <запрос>")
+		b.send(chatID, "Использование: /search &lt;запрос&gt;")
 		return
 	}
 	items, err := b.jobs.SearchMedia(ctx, q)
@@ -290,11 +247,11 @@ func (b *Bot) handleSearch(ctx context.Context, chatID int64, args string) {
 		return
 	}
 	if len(items) == 0 {
-		b.send(chatID, fmt.Sprintf("🔍 По запросу «%s» ничего не найдено", q))
+		b.send(chatID, fmt.Sprintf("🔍 По запросу «%s» ничего не найдено", escapeHTML(q)))
 		return
 	}
 	b.sendMediaList(ctx, chatID,
-		fmt.Sprintf("🔍 По запросу «%s» найдено %d:", q, len(items)),
+		fmt.Sprintf("🔍 По запросу «%s» найдено %d:", escapeHTML(q), len(items)),
 		items)
 }
 
@@ -332,11 +289,11 @@ func (b *Bot) sendMediaList(ctx context.Context, chatID int64, header string, it
 		title := shortenURL(item.DisplayTitle())
 		tags := ""
 		if len(item.Tags) > 0 {
-			tags = " · 🏷 " + strings.Join(item.Tags, ", ")
+			tags = " · 🏷 " + escapeHTML(strings.Join(item.Tags, ", "))
 		}
 		domain := item.Job.Domain()
 		sb.WriteString(fmt.Sprintf("\n%d. <b>%s</b>\n   🌐 %s%s\n",
-			i+1, escapeHTML(title), domain, tags))
+			i+1, escapeHTML(title), escapeHTML(domain), tags))
 
 		if item.Item == nil || !item.Item.IsAvailable() {
 			continue
@@ -397,8 +354,9 @@ func (b *Bot) isAllowed(chatID int64) bool {
 }
 
 func shortenURL(u string) string {
-	if len(u) > 45 {
-		return u[:42] + "…"
+	r := []rune(u)
+	if len(r) > 45 {
+		return string(r[:42]) + "…"
 	}
 	return u
 }

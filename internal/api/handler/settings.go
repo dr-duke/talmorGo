@@ -10,24 +10,18 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/config"
-	"github.com/dr-duke/talmorGo/internal/model"
-	"github.com/dr-duke/talmorGo/internal/ops"
+	"github.com/dr-duke/talmorGo/internal/library"
 	"github.com/dr-duke/talmorGo/internal/repo"
-	"github.com/dr-duke/talmorGo/internal/storage"
+	"github.com/dr-duke/talmorGo/internal/settings"
 	"github.com/dr-duke/talmorGo/web/templates"
 )
 
 type SettingsHandler struct {
-	Cookies   repo.CookieRepo
-	Settings  repo.SettingsRepo
-	Jobs      repo.JobRepo
-	Items     repo.ItemRepo
-	Tags      repo.TagRepo
-	Storage   *storage.Storage
-	Cfg       *config.Config
-	SiteName  string
-	Ops       repo.OperationRepo
-	OpsWorker OpsEnqueuer
+	Cookies  repo.CookieRepo
+	Settings *settings.Provider
+	Lib      *library.Service
+	Cfg      *config.Config
+	SiteName string
 }
 
 func (h *SettingsHandler) Page(w http.ResponseWriter, r *http.Request) {
@@ -37,51 +31,28 @@ func (h *SettingsHandler) Page(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
-	cf := h.Cfg.CookiesFilePath()
-	fileStatus := cookieFileStatus(cf)
-	rtSettings := h.loadRuntimeSettings(ctx)
-	templ.Handler(templates.SettingsPage(h.Cfg.BasePath, h.SiteName, records, fileStatus, rtSettings, h.runtimeDefaults())).ServeHTTP(w, r)
+	templ.Handler(templates.SettingsPage(
+		h.Cfg.BasePath, h.SiteName, records,
+		cookieFileStatus(h.Cfg.CookiesFilePath()),
+		h.Settings.Overrides(ctx), h.Settings.Defaults(),
+	)).ServeHTTP(w, r)
 }
 
-// SaveRuntimeSettings сохраняет настройки загрузчика из формы.
+// SaveRuntimeSettings сохраняет параметры загрузчика из формы.
 func (h *SettingsHandler) SaveRuntimeSettings(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "parse form", http.StatusBadRequest)
 		return
 	}
 	ctx := r.Context()
-	keys := []string{"yt_dlp_proxy", "yt_dlp_extra_args", "yt_dlp_output_format", "yt_dlp_max_files", "yt_dlp_timeout", "lib_page_size"}
-	for _, k := range keys {
-		val := strings.TrimSpace(r.FormValue(k))
-		if err := h.Settings.Set(ctx, k, val); err != nil {
-			slog.Error("settings: save runtime setting", "key", k, "err", err)
+	for _, key := range settings.Keys {
+		if err := h.Settings.Set(ctx, key, r.FormValue(key)); err != nil {
+			slog.Error("settings: save runtime setting", "key", key, "err", err)
 		}
 	}
-	rtSettings := h.loadRuntimeSettings(ctx)
-	templ.Handler(templates.RuntimeSettingsSection(h.Cfg.BasePath, rtSettings, h.runtimeDefaults())).ServeHTTP(w, r)
-}
-
-func (h *SettingsHandler) loadRuntimeSettings(ctx context.Context) map[string]string {
-	if h.Settings == nil {
-		return map[string]string{}
-	}
-	m, _ := h.Settings.All(ctx)
-	if m == nil {
-		return map[string]string{}
-	}
-	return m
-}
-
-// runtimeDefaults возвращает значения из конфига — показываются как placeholder в форме.
-func (h *SettingsHandler) runtimeDefaults() map[string]string {
-	return map[string]string{
-		"yt_dlp_proxy":         h.Cfg.YtDlpProxy,
-		"yt_dlp_extra_args":    h.Cfg.YtDlpExtraArgs,
-		"yt_dlp_output_format": h.Cfg.YtDlpOutputFormat,
-		"yt_dlp_max_files":     fmt.Sprintf("%d", h.Cfg.YtDlpMaxFilesPerRequest),
-		"yt_dlp_timeout":       fmt.Sprintf("%d", h.Cfg.YtDlpTimeout),
-		"lib_page_size":        fmt.Sprintf("%d", h.Cfg.LibPageSize),
-	}
+	templ.Handler(templates.RuntimeSettingsSection(
+		h.Cfg.BasePath, h.Settings.Overrides(ctx), h.Settings.Defaults(),
+	)).ServeHTTP(w, r)
 }
 
 func cookieFileStatus(path string) string {
@@ -103,7 +74,7 @@ func formatBytes(b int64) string {
 	}
 }
 
-// Import принимает Netscape-текст (весь cookies.txt), парсит по доменам и сохраняет.
+// Import принимает Netscape-текст (весь cookies.txt), разбирает по доменам и сохраняет.
 func (h *SettingsHandler) Import(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "parse form", http.StatusBadRequest)
@@ -115,9 +86,8 @@ func (h *SettingsHandler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	byDomain := parseCookiesByDomain(raw)
 	ctx := r.Context()
-	for domain, lines := range byDomain {
+	for domain, lines := range parseCookiesByDomain(raw) {
 		if err := h.Cookies.Upsert(ctx, domain, strings.Join(lines, "\n")); err != nil {
 			slog.Error("settings: upsert cookies", "domain", domain, "err", err)
 		}
@@ -151,7 +121,7 @@ func (h *SettingsHandler) DeleteDomain(w http.ResponseWriter, r *http.Request) {
 	templ.Handler(templates.CookieDomainList(records)).ServeHTTP(w, r)
 }
 
-// rewriteFile пересоздаёт объединённый cookies.txt на диске.
+// rewriteFile пересобирает объединённый cookies.txt на диске.
 func (h *SettingsHandler) rewriteFile(ctx context.Context) error {
 	merged, err := h.Cookies.MergeAll(ctx)
 	if err != nil {
@@ -159,25 +129,33 @@ func (h *SettingsHandler) rewriteFile(ctx context.Context) error {
 	}
 	path := h.Cfg.CookiesFilePath()
 	if merged == "" {
-		return os.Remove(path) // нет кук — файл не нужен (ошибка «не существует» ОК)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
 	}
 	return os.WriteFile(path, []byte(merged), 0o600)
 }
 
-// Cleanup безвозвратно удаляет failed/hidden задания, их файлы с диска и из БД,
-// а также записи потерянных файлов (lost_at IS NOT NULL).
+// Cleanup ставит в очередь безвозвратную очистку упавших и скрытых заданий.
 func (h *SettingsHandler) Cleanup(w http.ResponseWriter, r *http.Request) {
-	op := &model.Operation{
-		Kind:    ops.KindCleanup,
-		Title:   "Очистка библиотеки",
-		Payload: "{}",
-	}
-	if err := h.Ops.Create(r.Context(), op); err != nil {
-		slog.Error("settings: create cleanup op", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	if err := h.Lib.EnqueueCleanup(r.Context()); err != nil {
+		httpError(w, err)
 		return
 	}
-	h.OpsWorker.Enqueue()
+	writeOpStarted(w)
+}
+
+// Reindex ставит в очередь пересчёт тегов и сверку файлов с диском.
+func (h *SettingsHandler) Reindex(w http.ResponseWriter, r *http.Request) {
+	if err := h.Lib.EnqueueReindex(r.Context()); err != nil {
+		httpError(w, err)
+		return
+	}
+	writeOpStarted(w)
+}
+
+func writeOpStarted(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, `<p class="cleanup-result">Операция запущена…</p>`)
 }
@@ -202,21 +180,4 @@ func parseCookiesByDomain(raw string) map[string][]string {
 		out[domain] = append(out[domain], line)
 	}
 	return out
-}
-
-// Reindex очищает осиротевшие теги/коллекции и проверяет доступность файлов на диске.
-func (h *SettingsHandler) Reindex(w http.ResponseWriter, r *http.Request) {
-	op := &model.Operation{
-		Kind:    ops.KindReindex,
-		Title:   "Пересчёт тегов и коллекций",
-		Payload: "{}",
-	}
-	if err := h.Ops.Create(r.Context(), op); err != nil {
-		slog.Error("settings: create reindex op", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	h.OpsWorker.Enqueue()
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, `<p class="cleanup-result">Операция запущена…</p>`)
 }

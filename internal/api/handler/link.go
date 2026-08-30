@@ -3,26 +3,24 @@ package handler
 import (
 	"net/http"
 
-	"github.com/dr-duke/talmorGo/internal/repo"
+	"github.com/dr-duke/talmorGo/internal/library"
 )
 
 type LinkHandler struct {
-	Tokens repo.TokenRepo
-	Items  repo.ItemRepo
+	Lib *library.Service
 }
 
-// Resolve отдаёт медиаэлемент по presigned-токену (публичный endpoint, без авторизации).
+// Resolve отдаёт файл по постоянной ссылке (публичный эндпоинт, без авторизации).
+// Параметр download=true отдаёт файл вложением — на такие ссылки ведут кнопки
+// «Скачать» в Telegram.
 func (h *LinkHandler) Resolve(w http.ResponseWriter, r *http.Request) {
-	token := r.PathValue("token")
-	t, err := h.Tokens.GetByToken(r.Context(), token)
+	item, err := h.Lib.ResolveToken(r.Context(), r.PathValue("token"))
 	if err != nil {
-		http.NotFound(w, r)
+		notFoundOrGone(w, r, err)
 		return
 	}
-	item, err := h.Items.GetByID(r.Context(), t.ItemID)
-	if err != nil {
-		http.NotFound(w, r)
-		return
+	if r.URL.Query().Get("download") == "true" {
+		setAttachment(w, item.Name)
 	}
 	http.ServeFile(w, r, item.Path)
 }

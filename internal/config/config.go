@@ -12,10 +12,10 @@ type Config struct {
 	DBPath string `long:"db-path" env:"DB_PATH" default:"/data/talmor.db"`
 
 	// HTTP server
-	HTTPPort       string `long:"http-port" env:"HTTP_PORT" default:"8080"`
-	HTTPHost       string `long:"http-host" env:"HTTP_HOST" default:""`
-	BaseURL        string `long:"base-url" env:"BASE_URL"`
-	SiteName       string `long:"site-name" env:"SITE_NAME" default:"TalmorGo"`
+	HTTPPort string `long:"http-port" env:"HTTP_PORT" default:"8080"`
+	HTTPHost string `long:"http-host" env:"HTTP_HOST" default:""`
+	BaseURL  string `long:"base-url" env:"BASE_URL"`
+	SiteName string `long:"site-name" env:"SITE_NAME" default:"TalmorGo"`
 	// BasePath — префикс пути, если приложение смонтировано не в корне (напр. /talmor).
 	// Ingress передаёт запросы с полным путём; приложение само снимает префикс.
 	BasePath       string `long:"base-path" env:"BASE_PATH" default:""`
@@ -29,21 +29,22 @@ type Config struct {
 	TelegramDebug      bool    `long:"telegram-debug" env:"TELEGRAM_DEBUG"`
 
 	// yt-dlp
-	YtDlpBinary       string `long:"yt-dlp-binary" env:"YT_DLP_BINARY" default:"/app/yt-dlp"`
+	// Путь по умолчанию совпадает с тем, куда yt-dlp ставит pip в образе.
+	YtDlpBinary       string `long:"yt-dlp-binary" env:"YT_DLP_BINARY" default:"/usr/bin/yt-dlp"`
 	YtDlpOutputDir    string `long:"yt-dlp-output-dir" env:"YT_DLP_OUTPUT_DIR" default:"/data"`
 	YtDlpOutputFormat string `long:"yt-dlp-output-format" env:"YT_DLP_OUTPUT_FORMAT" default:"mp4"`
 	YtDlpProxy        string `long:"yt-dlp-proxy" env:"YT_DLP_PROXY"`
 	YtDlpTimeout      int    `long:"yt-dlp-timeout" env:"YT_DLP_TIMEOUT" default:"300"`
 	YtDlpExtraArgs    string `long:"yt-dlp-extra-args" env:"YT_DLP_EXTRA_ARGS"`
 	// Каталог незавершённых загрузок (вне зоны сканирования). Пусто → <output>/.talmor-tmp.
-	YtDlpStagingDir   string `long:"yt-dlp-staging-dir" env:"YT_DLP_STAGING_DIR" default:""`
+	YtDlpStagingDir string `long:"yt-dlp-staging-dir" env:"YT_DLP_STAGING_DIR" default:""`
 
 	// Worker pool
 	WorkerCount int `long:"worker-count" env:"WORKER_COUNT" default:"2"`
 
 	// Retry backoff
-	RetryBackoffBase    int `long:"retry-backoff-base" env:"RETRY_BACKOFF_BASE" default:"30"`
-	RetryMaxDuration    int `long:"retry-max-duration" env:"RETRY_MAX_DURATION" default:"86400"`
+	RetryBackoffBase int `long:"retry-backoff-base" env:"RETRY_BACKOFF_BASE" default:"30"`
+	RetryMaxDuration int `long:"retry-max-duration" env:"RETRY_MAX_DURATION" default:"86400"`
 
 	// File health check (секунды между проверками)
 	FileCheckInterval int `long:"file-check-interval" env:"FILE_CHECK_INTERVAL" default:"300"`
@@ -57,6 +58,12 @@ type Config struct {
 	// Извлечение аудио
 	FfmpegBinary   string `long:"ffmpeg-binary" env:"FFMPEG_BINARY" default:"ffmpeg"`
 	AudioOutputDir string `long:"audio-output-dir" env:"AUDIO_OUTPUT_DIR" default:""`
+
+	// Таймаут одной фоновой операции (секунды): защита от зависшего ffmpeg.
+	OpsTimeout int `long:"ops-timeout" env:"OPS_TIMEOUT" default:"3600"`
+
+	// Сколько часов хранить завершённые фоновые операции; 0 — не удалять.
+	OpsRetentionHours int `long:"ops-retention-hours" env:"OPS_RETENTION_HOURS" default:"72"`
 
 	// Медиатека
 	LibPageSize int `long:"lib-page-size" env:"LIB_PAGE_SIZE" default:"200"`

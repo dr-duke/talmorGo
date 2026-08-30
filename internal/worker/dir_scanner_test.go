@@ -39,9 +39,9 @@ func TestDirScanner_SkipsStagingDir(t *testing.T) {
 	s := NewDirScanner(jobs, items, tmp, 0, NewInFlightPaths())
 	s.scan(context.Background())
 
-	all, err := items.AllPaths(context.Background())
+	all, err := items.KnownPaths(context.Background())
 	if err != nil {
-		t.Fatalf("all paths: %v", err)
+		t.Fatalf("known paths: %v", err)
 	}
 	if _, ok := all[filepath.Join(tmp, "ready.mp4")]; !ok {
 		t.Error("ready.mp4 should have been imported")
@@ -78,9 +78,75 @@ func TestDirScanner_SkipsInFlight(t *testing.T) {
 	s := NewDirScanner(jobs, items, tmp, 0, inflight)
 	s.scan(context.Background())
 
-	all, _ := items.AllPaths(context.Background())
+	all, _ := items.KnownPaths(context.Background())
 	if _, ok := all[moving]; ok {
 		t.Error("in-flight file must NOT be imported")
+	}
+}
+
+// Файл, вернувшийся на место удалённого, должен снова стать доступным, а не
+// оставаться навсегда в статусе «удалён»: сканер раньше пропускал любой
+// известный путь и запись не оживала.
+func TestDirScanner_RestoresDeletedFile(t *testing.T) {
+	tmp := t.TempDir()
+	database, err := db.Open(filepath.Join(tmp, "test.db"))
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	defer database.Close()
+
+	jobs := repo.NewJobRepo(database)
+	items := repo.NewItemRepo(database)
+	ctx := context.Background()
+
+	path := filepath.Join(tmp, "clip.mp4")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewDirScanner(jobs, items, tmp, 0, NewInFlightPaths())
+	s.scan(ctx)
+
+	all, _ := items.ListAll(ctx)
+	if len(all) != 1 {
+		t.Fatalf("imported %d items, want 1", len(all))
+	}
+	itemID := all[0].ID
+
+	// Пользователь удалил файл: запись остаётся, файла на диске нет.
+	if err := items.SoftDelete(ctx, itemID); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	s.scan(ctx)
+
+	// Файл вернулся на диск.
+	if err := os.WriteFile(path, []byte("restored"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.scan(ctx)
+
+	got, err := items.GetByID(ctx, itemID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsAvailable() {
+		t.Error("restored file must become available again")
+	}
+	if got.Size != 8 {
+		t.Errorf("size = %d, want 8 (обновлён при восстановлении)", got.Size)
+	}
+
+	// Дубликат заводить нельзя.
+	after, _ := items.ListAll(ctx)
+	if len(after) != 1 {
+		t.Errorf("items = %d, want 1 (создан дубликат)", len(after))
+	}
+	allJobs, _ := jobs.List(ctx, repo.JobFilter{})
+	if len(allJobs) != 1 {
+		t.Errorf("jobs = %d, want 1 (создано лишнее задание)", len(allJobs))
 	}
 }
 

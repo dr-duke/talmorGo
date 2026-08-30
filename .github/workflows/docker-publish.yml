@@ -27,8 +27,29 @@ jobs:
       - name: Run tests
         run: go test $(go list ./... | grep -v tests/e2e)
 
+  # Браузерные тесты вынесены в отдельный job: им нужен headless-Chrome.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install templ
+        run: go install github.com/a-h/templ/cmd/templ@v0.3.887
+      - name: Generate templates
+        run: templ generate ./web/templates/...
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v1
+        id: chrome
+      - name: Run browser tests
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: go test ./tests/e2e/... -count=1
+
   build:
-    needs: test
+    needs: [test, e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: read

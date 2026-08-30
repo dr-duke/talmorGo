@@ -1,83 +1,61 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/a-h/templ"
 	"github.com/dr-duke/talmorGo/internal/config"
+	"github.com/dr-duke/talmorGo/internal/library"
 	"github.com/dr-duke/talmorGo/internal/model"
-	"github.com/dr-duke/talmorGo/internal/ops"
-	"github.com/dr-duke/talmorGo/internal/playlist"
-	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/storage"
 	"github.com/dr-duke/talmorGo/web/templates"
 )
 
-// OpsEnqueuer уведомляет воркер пакетных операций о новой задаче.
-type OpsEnqueuer interface {
-	Enqueue()
-}
-
+// MediaHandler — адаптер HTTP → library.Service. Доменных правил здесь нет.
 type MediaHandler struct {
-	Jobs        repo.JobRepo
-	Items       repo.ItemRepo
-	Tags        repo.TagRepo
-	Tokens      repo.TokenRepo
-	Storage     *storage.Storage
-	BaseURL     string
-	Pool        Enqueuer
-	Cfg         *config.Config
-	Settings    repo.SettingsRepo
-	Collections repo.CollectionRepo
-	Expander    *playlist.Expander
-	Ops         repo.OperationRepo
-	OpsWorker   OpsEnqueuer
+	Lib *library.Service
+	Cfg *config.Config
 }
 
-// LibrarySidebar отдаёт HTML-фрагмент сайдбара с коллекциями (для обновления после изменения коллекций).
+// LibrarySidebar отдаёт фрагмент сайдбара с коллекциями.
 func (h *MediaHandler) LibrarySidebar(w http.ResponseWriter, r *http.Request) {
-	cols, err := h.Collections.List(r.Context())
+	cols, err := h.Lib.ListCollections(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err)
 		return
 	}
 	templ.Handler(templates.SidebarNav(cols)).ServeHTTP(w, r)
 }
 
-// LibraryItems — фрагмент списка элементов (HTMX, поддерживает фильтрацию).
+// LibraryItems — фрагмент списка. С параметром rows=1 возвращает только строки
+// следующей страницы (догрузка по кнопке «Показать ещё»).
 func (h *MediaHandler) LibraryItems(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	f := parseMediaFilter(r)
-	f.Limit = h.resolvePageSize(ctx)
-
-	items, err := h.Jobs.FilterMedia(ctx, f)
+	page, err := h.Lib.Media(r.Context(), parseMediaFilter(r))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err)
 		return
 	}
-
-	total := len(items)
-	if len(items) >= f.Limit {
-		total, _ = h.Jobs.CountMedia(ctx, f)
+	if r.URL.Query().Get("rows") == "1" {
+		templ.Handler(templates.ItemRows(page)).ServeHTTP(w, r)
+		return
 	}
-
-	templ.Handler(templates.ItemList(items, total, f)).ServeHTTP(w, r)
+	templ.Handler(templates.ItemList(page)).ServeHTTP(w, r)
 }
 
-// TagsFragment отдаёт HTML-фрагмент облака тегов с учётом текущего фильтра.
+// TagsFragment отдаёт облако тегов с учётом текущего фильтра.
 func (h *MediaHandler) TagsFragment(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	f := parseMediaFilter(r)
-	tagCounts, err := h.Tags.ListWithCountFiltered(ctx, f)
+	tagCounts, err := h.Lib.TagCloud(r.Context(), f)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err)
 		return
 	}
 	activeTag := ""
@@ -87,52 +65,175 @@ func (h *MediaHandler) TagsFragment(w http.ResponseWriter, r *http.Request) {
 	templ.Handler(templates.TagCloud(tagCounts, activeTag)).ServeHTTP(w, r)
 }
 
-// PlaylistItems возвращает JSON-список {stream, title} для всех видео, соответствующих
-// текущему фильтру. Используется для серверной сборки плейлиста "Play All".
+// PlaylistItems возвращает JSON-плейлист по текущему фильтру.
 func (h *MediaHandler) PlaylistItems(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	f := parseMediaFilter(r)
-	f.Kind = "video"
-	f.Limit = 0 // без ограничений
-
-	items, err := h.Jobs.FilterMedia(ctx, f)
+	basePath := strings.TrimRight(h.Cfg.BasePath, "/")
+	entries, err := h.Lib.Playlist(r.Context(), parseMediaFilter(r), basePath)
 	if err != nil {
-		http.Error(w, "db error", http.StatusInternalServerError)
+		httpError(w, err)
 		return
 	}
-
-	type entry struct {
-		Stream string `json:"stream"`
-		Title  string `json:"title"`
-	}
-	basePath := strings.TrimRight(h.Cfg.BasePath, "/")
-	result := make([]entry, 0, len(items))
-	for _, mi := range items {
-		if mi.Item == nil || !mi.Item.IsAvailable() {
-			continue
-		}
-		result = append(result, entry{
-			Stream: basePath + "/items/" + mi.Item.ID + "/stream",
-			Title:  mi.DisplayTitle(),
-		})
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result) //nolint:errcheck
+	writeJSON(w, entries)
 }
 
-// resolvePageSize читает размер страницы из runtime-настроек, fallback на cfg.
-func (h *MediaHandler) resolvePageSize(ctx context.Context) int {
-	if h.Settings != nil {
-		if v, _ := h.Settings.Get(ctx, "lib_page_size"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				return n
-			}
+func parseMediaFilter(r *http.Request) model.MediaFilter {
+	q := r.URL.Query()
+	var tags []string
+	for _, t := range q["tag"] {
+		if t != "" {
+			tags = append(tags, t)
 		}
 	}
-	return h.Cfg.LibPageSize
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	return model.MediaFilter{
+		Query:  q.Get("q"),
+		Kind:   q.Get("kind"),
+		Tags:   tags,
+		Offset: offset,
+	}
 }
 
-// BulkTag ставит операцию назначения тега в очередь (асинхронно).
+// Stream отдаёт медиаэлемент (с поддержкой Range).
+func (h *MediaHandler) Stream(w http.ResponseWriter, r *http.Request) {
+	item, err := h.Lib.AvailableItem(r.Context(), r.PathValue("id"))
+	if err != nil {
+		notFoundOrGone(w, r, err)
+		return
+	}
+	if r.URL.Query().Get("download") == "true" {
+		setAttachment(w, item.Name)
+	}
+	http.ServeFile(w, r, item.Path)
+}
+
+// setAttachment выставляет заголовок скачивания с корректным экранированием:
+// имя файла задаётся пользователем и может содержать кавычки или юникод.
+func setAttachment(w http.ResponseWriter, name string) {
+	w.Header().Set("Content-Disposition",
+		mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+}
+
+func (h *MediaHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if err := h.Lib.DeleteItem(r.Context(), r.PathValue("id")); err != nil {
+		httpError(w, err)
+		return
+	}
+	refresh(w, "mediaRefresh")
+}
+
+func (h *MediaHandler) Rename(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if err := h.Lib.RenameItem(r.Context(), r.PathValue("id"), body.Name); err != nil {
+		if errors.Is(err, storage.ErrInvalidName) {
+			http.Error(w, "invalid name", http.StatusBadRequest)
+			return
+		}
+		httpError(w, err)
+		return
+	}
+	refresh(w, "mediaRefresh")
+}
+
+func (h *MediaHandler) PurgeJob(w http.ResponseWriter, r *http.Request) {
+	if err := h.Lib.PurgeJob(r.Context(), r.PathValue("id")); err != nil {
+		httpError(w, err)
+		return
+	}
+	refresh(w, "mediaRefresh")
+}
+
+func (h *MediaHandler) Hide(w http.ResponseWriter, r *http.Request) {
+	if err := h.Lib.HideJob(r.Context(), r.PathValue("id")); err != nil {
+		httpError(w, err)
+		return
+	}
+	refresh(w, "mediaRefresh")
+}
+
+func (h *MediaHandler) Unhide(w http.ResponseWriter, r *http.Request) {
+	if err := h.Lib.UnhideJob(r.Context(), r.PathValue("id")); err != nil {
+		httpError(w, err)
+		return
+	}
+	refresh(w, "mediaRefresh")
+}
+
+func (h *MediaHandler) AddTag(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if err := h.Lib.AddTag(r.Context(), r.PathValue("id"), body.Name); err != nil {
+		httpError(w, err)
+		return
+	}
+	refresh(w, "mediaRefresh", "tagsRefresh")
+}
+
+func (h *MediaHandler) RemoveTag(w http.ResponseWriter, r *http.Request) {
+	if err := h.Lib.RemoveTag(r.Context(), r.PathValue("id"), r.PathValue("tag")); err != nil {
+		httpError(w, err)
+		return
+	}
+	refresh(w, "mediaRefresh", "tagsRefresh")
+}
+
+// CreateLink возвращает постоянную ссылку на элемент.
+func (h *MediaHandler) CreateLink(w http.ResponseWriter, r *http.Request) {
+	url, err := h.Lib.CreateLink(r.Context(), r.PathValue("id"))
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"url": url})
+}
+
+// RevokeLink отзывает постоянную ссылку на элемент.
+func (h *MediaHandler) RevokeLink(w http.ResponseWriter, r *http.Request) {
+	if err := h.Lib.RevokeLink(r.Context(), r.PathValue("id")); err != nil {
+		if errors.Is(err, library.ErrNoLink) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		httpError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *MediaHandler) Log(w http.ResponseWriter, r *http.Request) {
+	log, err := h.Lib.Log(r.Context(), r.PathValue("id"))
+	if err != nil || log == "" {
+		http.Error(w, "log not available", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write([]byte(log)) //nolint:errcheck
+}
+
+func (h *MediaHandler) ListDeleted(w http.ResponseWriter, r *http.Request) {
+	items, err := h.Lib.ListDeleted(r.Context())
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	writeJSON(w, items)
+}
+
+// ── Фоновые операции ─────────────────────────────────────────────────────────
+
 func (h *MediaHandler) BulkTag(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		TagName string   `json:"tag"`
@@ -142,23 +243,13 @@ func (h *MediaHandler) BulkTag(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	payload, _ := json.Marshal(body)
-	op := &model.Operation{
-		Kind:    ops.KindBulkTag,
-		Title:   fmt.Sprintf("Тег «%s» → %d заданий", body.TagName, len(body.JobIDs)),
-		Payload: string(payload),
-	}
-	if err := h.Ops.Create(r.Context(), op); err != nil {
-		slog.Error("bulk tag: create op", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	if err := h.Lib.EnqueueBulkTag(r.Context(), body.TagName, body.JobIDs); err != nil {
+		httpError(w, err)
 		return
 	}
-	h.OpsWorker.Enqueue()
-	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusAccepted)
+	accepted(w, "mediaRefresh", "tagsRefresh", "queueRefresh")
 }
 
-// BulkHide ставит операцию скрытия в очередь (асинхронно).
 func (h *MediaHandler) BulkHide(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		JobIDs []string `json:"job_ids"`
@@ -167,180 +258,26 @@ func (h *MediaHandler) BulkHide(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	payload, _ := json.Marshal(body)
-	op := &model.Operation{
-		Kind:    ops.KindBulkHide,
-		Title:   fmt.Sprintf("Скрыть %d заданий", len(body.JobIDs)),
-		Payload: string(payload),
-	}
-	if err := h.Ops.Create(r.Context(), op); err != nil {
-		slog.Error("bulk hide: create op", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	if err := h.Lib.EnqueueBulkHide(r.Context(), body.JobIDs); err != nil {
+		httpError(w, err)
 		return
 	}
-	h.OpsWorker.Enqueue()
-	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusAccepted)
+	accepted(w, "mediaRefresh", "queueRefresh")
 }
 
-func parseMediaFilter(r *http.Request) model.MediaFilter {
-	var tags []string
-	for _, t := range r.URL.Query()["tag"] {
-		if t != "" {
-			tags = append(tags, t)
-		}
-	}
-	return model.MediaFilter{
-		Query: r.URL.Query().Get("q"),
-		Kind:  r.URL.Query().Get("kind"),
-		Tags:  tags,
-	}
-}
-
-// Stream отдаёт медиаэлемент (с Range-поддержкой).
-func (h *MediaHandler) Stream(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	item, err := h.Items.GetByID(r.Context(), id)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	if !item.IsAvailable() {
-		http.Error(w, "item not available", http.StatusGone)
-		return
-	}
-	if r.URL.Query().Get("download") == "true" {
-		w.Header().Set("Content-Disposition", `attachment; filename="`+item.Name+`"`)
-	}
-	http.ServeFile(w, r, item.Path)
-}
-
-// Delete — мягкое удаление: файл удаляется с диска, запись остаётся в БД.
-func (h *MediaHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	item, err := h.Items.GetByID(r.Context(), id)
-	if err != nil {
-		http.Error(w, "item not found", http.StatusNotFound)
-		return
-	}
-	h.Storage.Delete(item.Path) //nolint:errcheck
-	if err := h.Items.SoftDelete(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// PurgeJob безвозвратно удаляет hidden job и все его элементы.
-func (h *MediaHandler) PurgeJob(w http.ResponseWriter, r *http.Request) {
-	jobID := r.PathValue("id")
-	if items, err := h.Items.ListByJobID(r.Context(), jobID); err == nil {
-		for _, item := range items {
-			if item.IsAvailable() {
-				h.Storage.Delete(item.Path) //nolint:errcheck
-			}
-		}
-	}
-	if err := h.Jobs.Purge(r.Context(), jobID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// Hide убирает job из основного интерфейса.
-func (h *MediaHandler) Hide(w http.ResponseWriter, r *http.Request) {
-	jobID := r.PathValue("id")
-	if err := h.Jobs.Hide(r.Context(), jobID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// Unhide возвращает скрытую запись.
-func (h *MediaHandler) Unhide(w http.ResponseWriter, r *http.Request) {
-	jobID := r.PathValue("id")
-	if err := h.Jobs.Unhide(r.Context(), jobID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// Rename переименовывает медиаэлемент на диске и в БД.
-func (h *MediaHandler) Rename(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var body struct {
-		Name string `json:"name"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-	item, err := h.Items.GetByID(r.Context(), id)
-	if err != nil {
-		http.Error(w, "item not found", http.StatusNotFound)
-		return
-	}
-	newPath, err := h.Storage.Rename(item.Path, body.Name)
-	if err != nil {
-		if errors.Is(err, storage.ErrInvalidName) {
-			http.Error(w, "invalid name", http.StatusBadRequest)
-			return
-		}
-		http.Error(w, "rename failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if err := h.Items.Rename(r.Context(), id, body.Name, newPath); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// UpdateMeta обновляет аудио-метаданные элемента.
-// UpdateMeta ставит операцию обновления тегов одного аудиофайла в очередь.
-// В отличие от BulkMeta, записывает все 5 полей (пустое значение очищает тег).
 func (h *MediaHandler) UpdateMeta(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
 	var meta model.AudioMeta
 	if err := json.NewDecoder(r.Body).Decode(&meta); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	fields := map[string]string{
-		"title":  meta.Title,
-		"artist": meta.Artist,
-		"album":  meta.Album,
-		"year":   meta.Year,
-		"genre":  meta.Genre,
-	}
-	payload, _ := json.Marshal(struct {
-		ItemID string            `json:"item_id"`
-		Fields map[string]string `json:"fields"`
-	}{ItemID: id, Fields: fields})
-	op := &model.Operation{
-		Kind:    ops.KindUpdateMeta,
-		Title:   "Теги аудио → 1 файл",
-		Payload: string(payload),
-	}
-	if err := h.Ops.Create(r.Context(), op); err != nil {
-		slog.Error("update meta: create op", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	if err := h.Lib.EnqueueUpdateMeta(r.Context(), r.PathValue("id"), meta); err != nil {
+		httpError(w, err)
 		return
 	}
-	h.OpsWorker.Enqueue()
-	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusAccepted)
+	accepted(w, "mediaRefresh", "queueRefresh")
 }
 
-// BulkMeta ставит операцию обновления аудио-тегов в очередь (асинхронно).
 func (h *MediaHandler) BulkMeta(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ItemIDs []string          `json:"item_ids"`
@@ -354,156 +291,98 @@ func (h *MediaHandler) BulkMeta(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	payload, _ := json.Marshal(req)
-	op := &model.Operation{
-		Kind:    ops.KindBulkMeta,
-		Title:   fmt.Sprintf("Теги аудио → %d файлов", len(req.ItemIDs)),
-		Payload: string(payload),
-	}
-	if err := h.Ops.Create(r.Context(), op); err != nil {
-		slog.Error("bulk meta: create op", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	if err := h.Lib.EnqueueBulkMeta(r.Context(), req.ItemIDs, req.Fields); err != nil {
+		httpError(w, err)
 		return
 	}
-	h.OpsWorker.Enqueue()
-	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusAccepted)
+	accepted(w, "mediaRefresh", "queueRefresh")
 }
 
-// CreateLink создаёт или возвращает presigned-ссылку на элемент.
-func (h *MediaHandler) CreateLink(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	tok, err := h.Tokens.Upsert(r.Context(), id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"url": h.BaseURL + "/f/" + tok.Token}) //nolint:errcheck
+func (h *MediaHandler) ExtractAudio(w http.ResponseWriter, r *http.Request) {
+	h.extractAudio(w, r, []string{r.PathValue("id")})
 }
 
-// Redownload сбрасывает задание, удаляет все элементы и инициирует повторную загрузку.
-func (h *MediaHandler) Redownload(w http.ResponseWriter, r *http.Request) {
-	jobID := r.PathValue("id")
-	job, err := h.Jobs.GetByID(r.Context(), jobID)
-	if err != nil {
-		http.Error(w, "job not found", http.StatusNotFound)
-		return
-	}
-	if items, err := h.Items.ListByJobID(r.Context(), jobID); err == nil {
-		for _, item := range items {
-			h.Storage.Delete(item.Path) //nolint:errcheck
-		}
-	}
-	if err := h.Items.DeleteAllByJobID(r.Context(), jobID); err != nil {
-		slog.Warn("media: delete items for redownload", "job_id", jobID, "err", err)
-	}
-	if err := h.Jobs.Redownload(r.Context(), jobID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if h.Cfg != nil {
-		opts := resolveExpanderOpts(r.Context(), h.Cfg, h.Settings)
-		go func(id, rawURL string) {
-			h.Expander.ResolvePlaceholder(context.Background(), id, rawURL, opts, "web", 0)
-			h.Pool.Enqueue()
-		}(jobID, job.URL)
-	} else {
-		h.Jobs.ConfirmSingle(context.Background(), jobID) //nolint:errcheck
-		h.Pool.Enqueue()
-	}
-
-	w.Header().Set("HX-Trigger", "mediaRefresh")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// AddTag добавляет тег к заданию.
-func (h *MediaHandler) AddTag(w http.ResponseWriter, r *http.Request) {
-	jobID := r.PathValue("id")
+// ExtractAudioBulk извлекает дорожки из набора выделенных файлов.
+func (h *MediaHandler) ExtractAudioBulk(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
+		ItemIDs []string `json:"item_ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	tag, err := h.Tags.Upsert(r.Context(), body.Name)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if err := h.Tags.AddToJob(r.Context(), jobID, tag.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("HX-Trigger", `{"mediaRefresh":true,"tagsRefresh":true}`)
-	w.WriteHeader(http.StatusNoContent)
+	h.extractAudio(w, r, body.ItemIDs)
 }
 
-// RemoveTag удаляет тег у задания.
-func (h *MediaHandler) RemoveTag(w http.ResponseWriter, r *http.Request) {
-	jobID := r.PathValue("id")
-	tagName := r.PathValue("tag")
-	if err := h.Tags.RemoveFromJob(r.Context(), jobID, tagName); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+func (h *MediaHandler) extractAudio(w http.ResponseWriter, r *http.Request, ids []string) {
+	if err := h.Lib.EnqueueExtractAudio(r.Context(), ids); err != nil {
+		switch {
+		case errors.Is(err, library.ErrNothingToDo):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, library.ErrNotAvailable):
+			http.Error(w, "item not available", http.StatusGone)
+		default:
+			httpError(w, err)
+		}
 		return
 	}
-	w.Header().Set("HX-Trigger", `{"mediaRefresh":true,"tagsRefresh":true}`)
-	w.WriteHeader(http.StatusNoContent)
-}
 
-// Log возвращает plain-text лог последней попытки скачивания.
-func (h *MediaHandler) Log(w http.ResponseWriter, r *http.Request) {
-	jobID := r.PathValue("id")
-	log, err := h.Jobs.GetLog(r.Context(), jobID)
-	if err != nil || log == "" {
-		http.Error(w, "log not available", http.StatusNotFound)
-		return
+	msg := "Извлечение аудио запущено"
+	if len(ids) > 1 {
+		msg = fmt.Sprintf("Извлечение аудио запущено: %d файлов", len(ids))
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write([]byte(log)) //nolint:errcheck
+	trigger, _ := json.Marshal(map[string]any{
+		"showToast": msg, "mediaRefresh": true, "queueRefresh": true,
+	})
+	w.Header().Set("HX-Trigger", string(trigger))
+	w.WriteHeader(http.StatusAccepted)
 }
 
-// ListDeleted возвращает JSON-список soft-удалённых элементов.
-func (h *MediaHandler) ListDeleted(w http.ResponseWriter, r *http.Request) {
-	items, err := h.Items.ListDeleted(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+// ── общие помощники ──────────────────────────────────────────────────────────
+
+func writeJSON(w http.ResponseWriter, v any) {
+	// Пустой слайс в Go — nil, и он сериализуется в null. Клиент ждёт массив
+	// и на null падает (например, при разборе списка коллекций).
+	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.IsNil() {
+		v = []any{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(items) //nolint:errcheck
+	json.NewEncoder(w).Encode(v) //nolint:errcheck
 }
 
-// ExtractAudio извлекает аудиодорожку из скачанного видеофайла.
-// ExtractAudio ставит задачу извлечения аудиодорожки в очередь (асинхронно через ffmpeg).
-func (h *MediaHandler) ExtractAudio(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	srcItem, err := h.Items.GetByID(r.Context(), id)
-	if err != nil {
-		http.Error(w, "item not found", http.StatusNotFound)
+// refresh отвечает 204 и просит фронтенд обновить перечисленные области.
+func refresh(w http.ResponseWriter, events ...string) {
+	setTrigger(w, events...)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// accepted отвечает 202: работа поставлена в фоновую очередь.
+func accepted(w http.ResponseWriter, events ...string) {
+	setTrigger(w, events...)
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func setTrigger(w http.ResponseWriter, events ...string) {
+	if len(events) == 0 {
 		return
 	}
-	if !srcItem.IsAvailable() {
+	m := make(map[string]bool, len(events))
+	for _, e := range events {
+		m[e] = true
+	}
+	blob, _ := json.Marshal(m)
+	w.Header().Set("HX-Trigger", string(blob))
+}
+
+func httpError(w http.ResponseWriter, err error) {
+	slog.Error("handler", "err", err)
+	http.Error(w, err.Error(), http.StatusInternalServerError)
+}
+
+func notFoundOrGone(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, library.ErrNotAvailable) {
 		http.Error(w, "item not available", http.StatusGone)
 		return
 	}
-	payload, _ := json.Marshal(struct {
-		ItemID string `json:"item_id"`
-	}{ItemID: id})
-	op := &model.Operation{
-		Kind:    ops.KindExtractAudio,
-		Title:   "Извлечь аудио: " + srcItem.Name,
-		Payload: string(payload),
-	}
-	if err := h.Ops.Create(r.Context(), op); err != nil {
-		slog.Error("extract audio: create op", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	h.OpsWorker.Enqueue()
-	trigger, _ := json.Marshal(map[string]any{"showToast": "Извлечение аудио запущено", "mediaRefresh": true})
-	w.Header().Set("HX-Trigger", string(trigger))
-	w.WriteHeader(http.StatusAccepted)
+	http.NotFound(w, r)
 }

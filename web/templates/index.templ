@@ -10,35 +10,54 @@ func itoa(n int) string { return strconv.Itoa(n) }
 // SidebarNav — фрагмент боковой навигации (обновляется после изменения коллекций).
 templ SidebarNav(cols []*model.Collection) {
 	<nav class="sidebar" id="sidebar">
-		<button class="sidebar-nav-item sidebar-queue-item" id="sidebar-queue-btn" onclick="setQueue(this)">
+		<button class="sidebar-nav-item sidebar-queue-item" id="sidebar-queue-btn" data-action="nav-queue">
 			<span class="mi">pending</span>Очередь
 		</button>
 		<div class="sidebar-queue-divider"></div>
-		<button class="sidebar-nav-item active" data-kind="" onclick="setKind(this,'')">
+		<button class="sidebar-nav-item active" data-kind="" data-action="nav-kind">
 			<span class="mi">list</span>Все
 		</button>
-		<button class="sidebar-nav-item" data-kind="video" onclick="setKind(this,'video')">
+		<button class="sidebar-nav-item" data-kind="video" data-action="nav-kind">
 			<span class="mi">videocam</span>Видео
 		</button>
-		<button class="sidebar-nav-item" data-kind="audio" onclick="setKind(this,'audio')">
+		<button class="sidebar-nav-item" data-kind="audio" data-action="nav-kind">
 			<span class="mi">audio_file</span>Аудио
 		</button>
 		if len(cols) > 0 {
 			<div class="sidebar-divider"></div>
 			<span class="sidebar-section-label">Коллекции</span>
 			for _, c := range cols {
-				<button
-					class="sidebar-nav-item"
-					data-coll={ c.Name }
-					onclick="setColl(this,this.dataset.coll)"
-					title={ c.Name }
-				>
-					<span class="mi">folder</span>
-					<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{ c.Name }</span>
-					if c.ItemCount > 0 {
-						<span class="sidebar-count">{ itoa(c.ItemCount) }</span>
-					}
-				</button>
+				<div class="sidebar-coll-row row-menu-wrap">
+					<button
+						class="sidebar-nav-item"
+						data-coll={ c.Name }
+						data-action="nav-coll"
+						title={ c.Name }
+					>
+						<span class="mi">folder</span>
+						<span class="sidebar-coll-name">{ c.Name }</span>
+						if c.ItemCount > 0 {
+							<span class="sidebar-count">{ itoa(c.ItemCount) }</span>
+						}
+					</button>
+					<button class="icon-btn sidebar-coll-menu" title="Действия" data-action="row-menu">
+						<span class="mi">more_vert</span>
+					</button>
+					<div class="row-menu">
+						<button
+							class="row-menu-item"
+							data-coll-id={ c.ID }
+							data-coll-name={ c.Name }
+							data-action="coll-rename"
+						><span class="mi">edit</span>Переименовать</button>
+						<button
+							class="row-menu-item danger"
+							data-coll-id={ c.ID }
+							data-coll-name={ c.Name }
+							data-action="coll-delete"
+						><span class="mi">delete</span>Удалить коллекцию</button>
+					</div>
+				</div>
 			}
 		}
 	</nav>
@@ -47,7 +66,7 @@ templ SidebarNav(cols []*model.Collection) {
 templ Index(basePath string, siteName string, cols []*model.Collection) {
 	@Layout("Медиатека", basePath, siteName) {
 		<div class="app-shell">
-			<!-- ── Header ── -->
+			<!-- ── Шапка ── -->
 			<header class="app-header">
 				<a class="header-logo" href="./">
 					<img src="static/logo.svg" width="28" height="28" alt=""/>
@@ -77,12 +96,10 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 			</header>
 
 			<div class="app-body">
-				<!-- ── Sidebar ── -->
 				@SidebarNav(cols)
 
-				<!-- ── Main ── -->
 				<main class="main-content">
-					<!-- Library section -->
+					<!-- ── Медиатека ── -->
 					<div id="lib-section" class="content-inner">
 						<div class="toolbar">
 							<input
@@ -90,7 +107,7 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 								id="media-search"
 								class="search-input"
 								placeholder="Поиск по названию, URL, домену…"
-								oninput="onSearch(this.value)"
+								data-action-input="search"
 							/>
 							<div class="toolbar-chips">
 								<div
@@ -102,7 +119,7 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 							</div>
 							<button
 								class="icon-btn"
-								onclick="selectAllVisible()"
+								data-action="select-all"
 								title="Выбрать все отображаемые"
 							>
 								<span class="mi">checklist</span>
@@ -110,9 +127,9 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 						</div>
 
 						<div id="play-all-bar" class="play-all-bar">
-							<span class="mi" style="color:var(--accent)">folder</span>
+							<span class="mi play-all-icon">folder</span>
 							<span class="play-all-title" id="play-all-title"></span>
-							<button class="btn btn-primary btn-sm" onclick="playAll()">
+							<button class="btn btn-primary btn-sm" data-action="play-all">
 								<span class="mi">play_arrow</span>Воспроизвести всё
 							</button>
 						</div>
@@ -130,15 +147,15 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 							</div>
 						</div>
 
-						<!-- Скрытая форма фильтров -->
-						<form id="filter-form" style="display:none">
+						<!-- Скрытая форма фильтров: HTMX подмешивает её в запросы фрагментов -->
+						<form id="filter-form" class="hidden-form">
 							<input id="filter-q" name="q" type="hidden"/>
 							<input id="filter-kind" name="kind" type="hidden"/>
 							<input id="filter-tag" name="tag" type="hidden"/>
 						</form>
 					</div>
 
-					<!-- Queue section -->
+					<!-- ── Очередь ── -->
 					<div id="queue-section" class="content-inner" style="display:none">
 						<div class="queue-toolbar">
 							<button
@@ -153,7 +170,7 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 						<div
 							id="queue-inner"
 							hx-get="queue/items"
-							hx-trigger="load, mediaRefresh from:body"
+							hx-trigger="load, queueRefresh from:body"
 							hx-swap="outerHTML"
 						>
 							<div class="empty-state">
@@ -170,22 +187,22 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 		<dialog id="player-dialog">
 			<div class="dialog-header video-dialog-header">
 				<span class="dialog-title" id="player-title"></span>
-				<button class="icon-btn" onclick="playerMinimize()" title="Свернуть">
+				<button class="icon-btn" data-action="player-minimize" title="Свернуть">
 					<span class="mi">close_fullscreen</span>
 				</button>
-				<button class="icon-btn player-close" onclick="playerClose()" title="Закрыть">
+				<button class="icon-btn player-close" data-action="player-close" title="Закрыть">
 					<span class="mi">close</span>
 				</button>
 			</div>
 			<div id="player-wrap">
-				<video id="main-player" playsinline style="width:100%;display:block"></video>
+				<video id="main-player" playsinline></video>
 			</div>
 		</dialog>
 
-		<!-- ── Аудио элемент (скрытый, управляется player bar) ── -->
-		<audio id="audio-player" preload="auto" style="display:none"></audio>
+		<!-- Аудио проигрывается скрытым элементом, управление — в нижней панели -->
+		<audio id="audio-player" preload="auto"></audio>
 
-		<!-- ── Player bar ── -->
+		<!-- ── Панель плеера ── -->
 		<div id="player-bar" class="player-bar">
 			<div class="pb-info">
 				<span class="mi pb-kind-icon" id="pb-kind-icon">play_circle</span>
@@ -193,19 +210,19 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 			</div>
 			<div class="pb-center">
 				<span class="pb-time" id="pb-current">0:00</span>
-				<div class="pb-track" id="pb-track" onclick="playerSeek(event)">
+				<div class="pb-track" id="pb-track" data-action="player-seek">
 					<div class="pb-fill" id="pb-fill"></div>
 				</div>
 				<span class="pb-time" id="pb-duration">0:00</span>
 			</div>
 			<div class="pb-controls">
-				<button class="icon-btn" id="pb-expand-btn" onclick="playerExpand()" title="Развернуть" style="display:none">
+				<button class="icon-btn" id="pb-expand-btn" data-action="player-expand" title="Развернуть" style="display:none">
 					<span class="mi">open_in_full</span>
 				</button>
-				<button class="icon-btn pb-play-btn" id="pb-play-btn" onclick="playerToggle()" title="Пауза/Воспроизведение">
+				<button class="icon-btn pb-play-btn" id="pb-play-btn" data-action="player-toggle" title="Пауза/Воспроизведение">
 					<span class="mi" id="pb-play-icon">pause</span>
 				</button>
-				<button class="icon-btn" onclick="playerClose()" title="Остановить">
+				<button class="icon-btn" data-action="player-close" title="Остановить">
 					<span class="mi">close</span>
 				</button>
 			</div>
@@ -214,7 +231,9 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 		<dialog id="log-dialog">
 			<div class="dialog-header">
 				<span class="dialog-title" id="log-title">Лог скачивания</span>
-				<button class="icon-btn player-close" onclick="document.getElementById('log-dialog').close()"><span class="mi">close</span></button>
+				<button class="icon-btn player-close" data-action="dialog-close" data-dialog="log-dialog">
+					<span class="mi">close</span>
+				</button>
 			</div>
 			<pre id="log-content">Загрузка…</pre>
 		</dialog>
@@ -223,60 +242,45 @@ templ Index(basePath string, siteName string, cols []*model.Collection) {
 		<dialog id="meta-dialog">
 			<div class="dialog-header">
 				<span class="dialog-title" id="meta-dialog-title">Теги аудио</span>
-				<button class="icon-btn" onclick="document.getElementById('meta-dialog').close()"><span class="mi">close</span></button>
+				<button class="icon-btn" data-action="dialog-close" data-dialog="meta-dialog">
+					<span class="mi">close</span>
+				</button>
 			</div>
 			<div class="meta-dialog-body">
 				<table class="meta-matrix">
 					<tbody>
-						<tr class="meta-row" data-field="title">
-							<td><input type="checkbox" class="meta-check" onchange="metaCheckChange(this)"/></td>
-							<td class="meta-label">Название</td>
-							<td><input type="text" class="meta-input" id="meta-title" placeholder="Название трека"/></td>
-						</tr>
-						<tr class="meta-row" data-field="artist">
-							<td><input type="checkbox" class="meta-check" onchange="metaCheckChange(this)"/></td>
-							<td class="meta-label">Исполнитель</td>
-							<td><input type="text" class="meta-input" id="meta-artist" placeholder="Исполнитель"/></td>
-						</tr>
-						<tr class="meta-row" data-field="album">
-							<td><input type="checkbox" class="meta-check" onchange="metaCheckChange(this)"/></td>
-							<td class="meta-label">Альбом</td>
-							<td><input type="text" class="meta-input" id="meta-album" placeholder="Альбом"/></td>
-						</tr>
-						<tr class="meta-row" data-field="year">
-							<td><input type="checkbox" class="meta-check" onchange="metaCheckChange(this)"/></td>
-							<td class="meta-label">Год</td>
-							<td><input type="text" class="meta-input" id="meta-year" placeholder="2024"/></td>
-						</tr>
-						<tr class="meta-row" data-field="genre">
-							<td><input type="checkbox" class="meta-check" onchange="metaCheckChange(this)"/></td>
-							<td class="meta-label">Жанр</td>
-							<td><input type="text" class="meta-input" id="meta-genre" placeholder="Жанр"/></td>
-						</tr>
+						@metaField("title", "Название", "Название трека")
+						@metaField("artist", "Исполнитель", "Исполнитель")
+						@metaField("album", "Альбом", "Альбом")
+						@metaField("year", "Год", "2024")
+						@metaField("genre", "Жанр", "Жанр")
 					</tbody>
 				</table>
 				<div class="meta-footer">
 					<span id="meta-count-note" class="meta-count-note"></span>
-					<button class="btn btn-primary btn-sm" onclick="applyMeta()">Применить</button>
+					<button class="btn btn-primary btn-sm" data-action="meta-apply">Применить</button>
 				</div>
 			</div>
 		</dialog>
 
 		@ActionBar()
 
-		<!-- ── SSE: dispatches htmx mediaRefresh ── -->
-		<script>
-			(function() {
-				const base = document.querySelector('base')?.href || '/';
-				const es = new EventSource(base + 'events');
-				function dispatchRefresh() {
-					htmx.trigger(document.body, 'mediaRefresh');
-				}
-				es.addEventListener('update', dispatchRefresh);
-				es.addEventListener('message', dispatchRefresh);
-			})();
-		</script>
-
-		<script src="static/app.js"></script>
+		<script type="module" src="static/js/main.js"></script>
 	}
+}
+
+// metaField — строка диалога тегов: галочка «применять», подпись и поле ввода.
+templ metaField(field, label, placeholder string) {
+	<tr class="meta-row" data-field={ field }>
+		<td><input type="checkbox" class="meta-check" data-action-change="meta-check"/></td>
+		<td class="meta-label">{ label }</td>
+		<td>
+			<input
+				type="text"
+				class="meta-input"
+				id={ "meta-" + field }
+				placeholder={ placeholder }
+			/>
+		</td>
+	</tr>
 }
