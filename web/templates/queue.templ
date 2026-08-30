@@ -129,7 +129,7 @@ templ queueRow(j *model.Job) {
 					class="icon-btn"
 					data-job-id={ j.ID }
 					data-title={ j.DisplayName() }
-					onclick="openLog(this.dataset.jobId, this.dataset.title)"
+					data-action="open-log"
 					title="Лог"
 				><span class="mi">terminal</span></button>
 			}

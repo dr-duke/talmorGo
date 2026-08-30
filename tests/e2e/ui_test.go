@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,7 +35,8 @@ var tabCtx context.Context
 var tabCancel context.CancelFunc
 
 // chromePath возвращает путь к браузеру: из CHROME_PATH, иначе из типовых мест
-// установки. Раньше путь был зашит под macOS и тесты не шли ни в CI, ни в Linux.
+// установки и PATH. Раньше путь был зашит под macOS, и тесты не шли ни в CI,
+// ни в Linux.
 func chromePath() string {
 	if p := os.Getenv("CHROME_PATH"); p != "" {
 		return p
@@ -51,11 +53,24 @@ func chromePath() string {
 			return c
 		}
 	}
-	return "" // chromedp сам поищет браузер в PATH
+	for _, name := range []string{"google-chrome", "chromium", "chromium-browser"} {
+		if p, err := exec.LookPath(name); err == nil {
+			return p
+		}
+	}
+	return ""
 }
 
 func TestMain(m *testing.M) {
+	// Без браузера пакет пропускается целиком: `go test ./...` на машине
+	// разработчика не должен падать из-за отсутствия Chrome.
+	chrome := chromePath()
+	if chrome == "" {
+		fmt.Println("e2e: браузер не найден (задайте CHROME_PATH) — тесты пропущены")
+		os.Exit(0)
+	}
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chrome),
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
@@ -63,9 +78,6 @@ func TestMain(m *testing.M) {
 		chromedp.Flag("allow-running-insecure-content", true),
 		chromedp.Flag("unsafely-treat-insecure-origin-as-secure", "http://127.0.0.1"),
 	)
-	if p := chromePath(); p != "" {
-		opts = append(opts, chromedp.ExecPath(p))
-	}
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer allocCancel()
 
@@ -511,7 +523,7 @@ func TestLogDialogOpensWithContent(t *testing.T) {
 		openMedia(env.URL),
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
 		openRowMenu(),
-		chromedp.Click(`[onclick*="openLog"]`, chromedp.ByQuery),
+		chromedp.Click(`[data-action="open-log"]`, chromedp.ByQuery),
 		chromedp.Sleep(500*time.Millisecond),
 	)
 	if err != nil {
@@ -549,7 +561,7 @@ func TestLogDialogCloses(t *testing.T) {
 		openMedia(env.URL),
 		chromedp.WaitVisible(`.status-done`, chromedp.ByQuery),
 		openRowMenu(),
-		chromedp.Click(`[onclick*="openLog"]`, chromedp.ByQuery),
+		chromedp.Click(`[data-action="open-log"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`#log-dialog[open]`, chromedp.ByQuery),
 		chromedp.Click(`#log-dialog .player-close`, chromedp.ByQuery),
 		chromedp.Sleep(200*time.Millisecond),

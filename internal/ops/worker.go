@@ -275,8 +275,11 @@ func topicsFor(kind string) []sse.Topic {
 	switch kind {
 	case KindBulkTag, KindBulkHide:
 		return []sse.Topic{sse.TopicQueue, sse.TopicLibrary, sse.TopicTags}
-	case KindBulkMeta, KindUpdateMeta, KindExtractAudio:
+	case KindBulkMeta, KindUpdateMeta:
 		return []sse.Topic{sse.TopicQueue, sse.TopicLibrary}
+	case KindExtractAudio:
+		// Извлечение вешает на задание тег — облако тоже меняется.
+		return []sse.Topic{sse.TopicQueue, sse.TopicLibrary, sse.TopicTags}
 	case KindReindex:
 		return []sse.Topic{sse.TopicQueue, sse.TopicLibrary, sse.TopicTags, sse.TopicCollections}
 	case KindCleanup:
@@ -356,31 +359,75 @@ func (w *Worker) execBulkMeta(ctx context.Context, op *model.Operation) error {
 // ── ExtractAudio ─────────────────────────────────────────────────────────────
 
 type extractAudioPayload struct {
-	ItemID string `json:"item_id"`
+	// ItemID — формат одиночной операции; поддерживается ради записей,
+	// оставшихся в очереди с прошлых версий.
+	ItemID  string   `json:"item_id,omitempty"`
+	ItemIDs []string `json:"item_ids,omitempty"`
 }
 
+func (p extractAudioPayload) ids() []string {
+	if len(p.ItemIDs) > 0 {
+		return p.ItemIDs
+	}
+	if p.ItemID != "" {
+		return []string{p.ItemID}
+	}
+	return nil
+}
+
+// execExtractAudio извлекает дорожки из набора файлов. Ошибка на одном файле
+// не отменяет остальные — как и при загрузке плейлиста, частичный успех
+// считается успехом, а подробности уходят в лог.
 func (w *Worker) execExtractAudio(ctx context.Context, op *model.Operation) error {
 	var p extractAudioPayload
 	if err := json.Unmarshal([]byte(op.Payload), &p); err != nil {
 		return err
 	}
-	src, err := w.Items.GetByID(ctx, p.ItemID)
+	ids := p.ids()
+	if len(ids) == 0 {
+		return fmt.Errorf("не указано ни одного файла")
+	}
+
+	var done int
+	var firstErr error
+	for _, id := range ids {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := w.extractOne(ctx, id); err != nil {
+			slog.Warn("ops: extract audio", "item_id", id, "err", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		done++
+	}
+
+	if done == 0 {
+		return firstErr
+	}
+	if firstErr != nil {
+		slog.Warn("ops: extract audio finished with errors", "ok", done, "total", len(ids))
+	}
+	return nil
+}
+
+func (w *Worker) extractOne(ctx context.Context, itemID string) error {
+	src, err := w.Items.GetByID(ctx, itemID)
 	if err != nil {
 		return fmt.Errorf("get item: %w", err)
 	}
 	if !src.IsAvailable() {
-		return fmt.Errorf("item not available")
+		return fmt.Errorf("файл недоступен")
 	}
 
-	var meta model.AudioMeta
-	if job, err := w.Jobs.GetByID(ctx, src.JobID); err == nil {
-		meta.Title = job.Title
-		meta.Artist = job.Domain()
-	}
+	// Теги берём из названия самого видео: источник скачивания в них не место.
+	meta := audio.TrackMeta(src.Name)
 
 	outPath, err := audio.Extract(ctx, w.Cfg.FfmpegBinary, src.Path, w.Cfg.AudioDir(), meta)
 	if err != nil {
-		return fmt.Errorf("ffmpeg extract: %w", err)
+		return err
 	}
 
 	var size int64
@@ -399,7 +446,18 @@ func (w *Worker) execExtractAudio(ctx context.Context, op *model.Operation) erro
 	if err := w.Items.Create(ctx, audioItem); err != nil {
 		return fmt.Errorf("save audio item: %w", err)
 	}
-	slog.Info("ops: audio extracted", "src", src.Path, "dst", outPath)
+
+	// Помечаем задание тегом, чтобы извлечённое было видно одним фильтром.
+	if tag, err := w.Tags.Upsert(ctx, ExtractedAudioTag); err == nil {
+		if err := w.Tags.AddToJob(ctx, src.JobID, tag.ID); err != nil {
+			slog.Warn("ops: tag extracted audio", "job_id", src.JobID, "err", err)
+		}
+	} else {
+		slog.Warn("ops: upsert audio tag", "err", err)
+	}
+
+	slog.Info("ops: audio extracted", "src", src.Path, "dst", outPath,
+		"artist", meta.Artist, "title", meta.Title)
 	return nil
 }
 

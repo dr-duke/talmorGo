@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -298,17 +299,42 @@ func (h *MediaHandler) BulkMeta(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MediaHandler) ExtractAudio(w http.ResponseWriter, r *http.Request) {
-	if err := h.Lib.EnqueueExtractAudio(r.Context(), r.PathValue("id")); err != nil {
-		if errors.Is(err, library.ErrNotAvailable) {
-			http.Error(w, "item not available", http.StatusGone)
-			return
-		}
-		httpError(w, err)
+	h.extractAudio(w, r, []string{r.PathValue("id")})
+}
+
+// ExtractAudioBulk извлекает дорожки из набора выделенных файлов.
+func (h *MediaHandler) ExtractAudioBulk(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ItemIDs []string `json:"item_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	trigger := map[string]any{"showToast": "Извлечение аудио запущено", "mediaRefresh": true}
-	blob, _ := json.Marshal(trigger)
-	w.Header().Set("HX-Trigger", string(blob))
+	h.extractAudio(w, r, body.ItemIDs)
+}
+
+func (h *MediaHandler) extractAudio(w http.ResponseWriter, r *http.Request, ids []string) {
+	if err := h.Lib.EnqueueExtractAudio(r.Context(), ids); err != nil {
+		switch {
+		case errors.Is(err, library.ErrNothingToDo):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, library.ErrNotAvailable):
+			http.Error(w, "item not available", http.StatusGone)
+		default:
+			httpError(w, err)
+		}
+		return
+	}
+
+	msg := "Извлечение аудио запущено"
+	if len(ids) > 1 {
+		msg = fmt.Sprintf("Извлечение аудио запущено: %d файлов", len(ids))
+	}
+	trigger, _ := json.Marshal(map[string]any{
+		"showToast": msg, "mediaRefresh": true, "queueRefresh": true,
+	})
+	w.Header().Set("HX-Trigger", string(trigger))
 	w.WriteHeader(http.StatusAccepted)
 }
 

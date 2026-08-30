@@ -86,6 +86,7 @@ func New(d Deps) *Server {
 	mux.HandleFunc("POST /items/{id}/link", mh.CreateLink)
 	mux.HandleFunc("DELETE /items/{id}/link", mh.RevokeLink)
 	mux.HandleFunc("POST /items/{id}/extract-audio", mh.ExtractAudio)
+	mux.HandleFunc("POST /items/extract-audio-bulk", mh.ExtractAudioBulk)
 	mux.HandleFunc("GET /items/deleted", mh.ListDeleted)
 
 	// Задания.

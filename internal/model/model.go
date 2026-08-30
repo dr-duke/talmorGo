@@ -13,8 +13,9 @@ var ytdlpID = regexp.MustCompile(`\s*\[[A-Za-z0-9_-]{6,15}\](\.[^.]+)$`)
 // ytdlpFmt matches yt-dlp format codes in filenames, e.g. ".f140" before the extension.
 var ytdlpFmt = regexp.MustCompile(`\.f\d{3,4}(\.[^.]+)$`)
 
-// cleanFileName strips yt-dlp artifacts (video IDs, format codes) from file names.
-func cleanFileName(name string) string {
+// CleanFileName убирает из имени файла артефакты yt-dlp: идентификатор ролика
+// («… [dQw4w9WgXcQ].mp4») и код формата («….f140.mp4»).
+func CleanFileName(name string) string {
 	strip := func(s string, m []int) string {
 		ext := s[m[2]:]
 		base := strings.TrimRight(s[:m[0]], " \t")
@@ -151,7 +152,7 @@ func (m *MediaItem) EffectiveStatus() string {
 // DisplayTitle возвращает имя файла или заголовок задания.
 func (m *MediaItem) DisplayTitle() string {
 	if m.Item != nil && m.Item.IsAvailable() {
-		return cleanFileName(m.Item.Name)
+		return CleanFileName(m.Item.Name)
 	}
 	if m.Job.Title != "" {
 		return m.Job.Title

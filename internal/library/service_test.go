@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dr-duke/talmorGo/internal/config"
@@ -261,7 +262,7 @@ func TestEnqueueExtractAudio_RejectsUnavailableItem(t *testing.T) {
 	ctx := context.Background()
 	_, item := e.addFile(t, "audio-src.mp4")
 
-	if err := e.svc.EnqueueExtractAudio(ctx, item.ID); err != nil {
+	if err := e.svc.EnqueueExtractAudio(ctx, []string{item.ID}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	if e.runner.enqueued != 1 {
@@ -271,8 +272,69 @@ func TestEnqueueExtractAudio_RejectsUnavailableItem(t *testing.T) {
 	if err := e.svc.DeleteItem(ctx, item.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.EnqueueExtractAudio(ctx, item.ID); err == nil {
+	if err := e.svc.EnqueueExtractAudio(ctx, []string{item.ID}); err == nil {
 		t.Error("extracting audio from a deleted item must fail")
+	}
+}
+
+// Пакетное извлечение: одна операция на весь набор, недоступные файлы отсеиваются.
+func TestEnqueueExtractAudio_Bulk(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+
+	_, first := e.addFile(t, "one.mp4")
+	_, second := e.addFile(t, "two.mp4")
+	_, gone := e.addFile(t, "gone.mp4")
+	if err := e.svc.DeleteItem(ctx, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.svc.EnqueueExtractAudio(ctx, []string{first.ID, gone.ID, second.ID}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	list, err := e.svc.Operations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("операций = %d, ожидалась одна на весь набор", len(list))
+	}
+	if !strings.Contains(list[0].Title, "2 файлов") {
+		t.Errorf("заголовок операции = %q, ожидалось упоминание двух файлов", list[0].Title)
+	}
+	if strings.Contains(list[0].Payload, gone.ID) {
+		t.Error("удалённый файл не должен попадать в операцию")
+	}
+}
+
+// Повторы в запросе не должны множить работу для ffmpeg.
+func TestEnqueueExtractAudio_Deduplicates(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	_, item := e.addFile(t, "dup.mp4")
+
+	if err := e.svc.EnqueueExtractAudio(ctx, []string{item.ID, item.ID, "", item.ID}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	list, err := e.svc.Operations(ctx)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("операций = %d, err = %v", len(list), err)
+	}
+	if strings.Count(list[0].Payload, item.ID) != 1 {
+		t.Errorf("идентификатор повторяется в задании операции: %s", list[0].Payload)
+	}
+	if !strings.Contains(list[0].Title, "dup.mp4") {
+		t.Errorf("заголовок = %q, ожидалось имя единственного файла", list[0].Title)
+	}
+}
+
+// Пустой набор — понятная ошибка, а не пустая операция в очереди.
+func TestEnqueueExtractAudio_Empty(t *testing.T) {
+	e := newEnv(t)
+	if err := e.svc.EnqueueExtractAudio(context.Background(), nil); !errors.Is(err, library.ErrNothingToDo) {
+		t.Errorf("ошибка = %v, ожидалась ErrNothingToDo", err)
 	}
 }
 

@@ -126,7 +126,7 @@ func TestAuth_PublicPaths(t *testing.T) {
 	}{
 		{"/login", http.StatusOK},
 		{"/health", http.StatusOK},
-		{"/static/app.js", http.StatusOK},
+		{"/static/js/main.js", http.StatusOK},
 		{"/f/unknown-token", http.StatusNotFound}, // публичный, но токена нет
 	}
 	for _, c := range cases {

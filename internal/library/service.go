@@ -45,6 +45,9 @@ var ErrNotAvailable = fmt.Errorf("item not available")
 // ErrNoLink — постоянной ссылки на элемент не выдавалось.
 var ErrNoLink = fmt.Errorf("постоянная ссылка не выдавалась")
 
+// ErrNothingToDo — в запросе не оказалось ни одного элемента.
+var ErrNothingToDo = fmt.Errorf("не выбрано ни одного файла")
+
 // ── Выдача медиатеки ─────────────────────────────────────────────────────────
 
 // Page — страница медиатеки: строки и полное число совпадений.
@@ -336,13 +339,40 @@ func (s *Service) EnqueueUpdateMeta(ctx context.Context, itemID string, meta mod
 		map[string]any{"item_id": itemID, "fields": fields})
 }
 
-func (s *Service) EnqueueExtractAudio(ctx context.Context, itemID string) error {
-	item, err := s.AvailableItem(ctx, itemID)
-	if err != nil {
-		return err
+// EnqueueExtractAudio ставит извлечение дорожек из набора файлов.
+// Недоступные файлы отсеиваются сразу, чтобы операция не создавалась впустую.
+func (s *Service) EnqueueExtractAudio(ctx context.Context, itemIDs []string) error {
+	if len(itemIDs) == 0 {
+		return ErrNothingToDo
 	}
-	return s.enqueue(ctx, ops.KindExtractAudio, "Извлечь аудио: "+item.Name,
-		map[string]any{"item_id": itemID})
+
+	var ready []string
+	var names []string
+	seen := make(map[string]bool, len(itemIDs))
+	for _, id := range itemIDs {
+		// Повтор в запросе не должен превращаться в лишний запуск ffmpeg.
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+
+		item, err := s.AvailableItem(ctx, id)
+		if err != nil {
+			continue
+		}
+		ready = append(ready, id)
+		names = append(names, item.Name)
+	}
+	if len(ready) == 0 {
+		return ErrNotAvailable
+	}
+
+	title := "Извлечь аудио: " + names[0]
+	if len(ready) > 1 {
+		title = fmt.Sprintf("Извлечь аудио → %d файлов", len(ready))
+	}
+	return s.enqueue(ctx, ops.KindExtractAudio, title,
+		map[string]any{"item_ids": ready})
 }
 
 func (s *Service) EnqueueReindex(ctx context.Context) error {

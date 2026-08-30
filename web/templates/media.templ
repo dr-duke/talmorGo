@@ -70,24 +70,24 @@ templ TagCloud(tagCounts []*model.TagWithCount, activeTag string) {
 				<button
 					class={ "chip", "coll", templ.KV("tag-extra", i >= 5), templ.KV("active", t.Name == activeTag) }
 					data-tag={ t.Name }
-					onclick="toggleTag(this)"
+					data-action="toggle-tag"
 					title={ "Коллекция: " + t.Name }
 				>
-					<span class="mi" style="font-size:13px">folder</span>{ t.Name }
-					<span style="opacity:.65">{ strconv.Itoa(t.Count) }</span>
+					<span class="mi chip-icon">folder</span>{ t.Name }
+					<span class="chip-count">{ strconv.Itoa(t.Count) }</span>
 				</button>
 			} else {
 				<button
 					class={ "chip", templ.KV("tag-extra", i >= 5), templ.KV("active", t.Name == activeTag) }
 					data-tag={ t.Name }
-					onclick="toggleTag(this)"
+					data-action="toggle-tag"
 				>
-					{ t.Name }<span style="opacity:.65">{ strconv.Itoa(t.Count) }</span>
+					{ t.Name }<span class="chip-count">{ strconv.Itoa(t.Count) }</span>
 				</button>
 			}
 		}
 		if len(tagCounts) > 5 {
-			<button class="chip tag-expand-btn" onclick="expandTags()">
+			<button class="chip tag-expand-btn" data-action="expand-tags">
 				+{ strconv.Itoa(len(tagCounts) - 5) } ещё
 			</button>
 		}
@@ -97,22 +97,25 @@ templ TagCloud(tagCounts []*model.TagWithCount, activeTag string) {
 templ ActionBar() {
 	<div id="action-bar" class="action-bar hidden">
 		<span id="select-count" class="action-bar-count">0 выбрано</span>
-		<button class="btn btn-ghost btn-sm" onclick="bulkTag()">
+		<button class="btn btn-ghost btn-sm" data-action="bulk-tag">
 			<span class="mi">label</span>Тег
 		</button>
-		<button id="action-meta-btn" class="btn btn-ghost btn-sm" onclick="openMetaDialog()" style="display:none">
+		<button id="action-meta-btn" class="btn btn-ghost btn-sm" data-action="meta-open-selection" style="display:none">
 			<span class="mi">music_note</span>Теги
 		</button>
+		<button id="action-extract-btn" class="btn btn-ghost btn-sm" data-action="bulk-extract-audio" style="display:none" title="Извлечь аудиодорожку из выделенных видео">
+			<span class="mi">audio_file</span>Извлечь аудио
+		</button>
 		<div class="coll-dropdown-wrap">
-			<button class="btn btn-ghost btn-sm" onclick="toggleCollDropdown()">
+			<button class="btn btn-ghost btn-sm" data-action="coll-dropdown">
 				<span class="mi">folder_open</span>В коллекцию
 			</button>
 			<div id="coll-dropdown" class="coll-dropdown hidden"></div>
 		</div>
-		<button class="icon-btn" onclick="bulkHide()" title="Скрыть">
+		<button class="icon-btn" data-action="bulk-hide" title="Скрыть">
 			<span class="mi">visibility_off</span>
 		</button>
-		<button class="icon-btn" onclick="clearSelection()" title="Отменить выбор">
+		<button class="icon-btn" data-action="selection-clear" title="Отменить выбор">
 			<span class="mi">close</span>
 		</button>
 	</div>
@@ -138,21 +141,25 @@ templ mediaRow(item *model.MediaItem) {
 			data-meta-genre={ item.Item.Meta.Genre }
 		}
 	>
-		<label class="row-check" onclick="event.stopPropagation()">
-			<input type="checkbox" class="row-checkbox" value={ item.Job.ID } onchange="onRowSelect(this)"/>
+		<label class="row-check">
+			<input type="checkbox" class="row-checkbox" value={ item.Job.ID } data-action-change="row-select"/>
 		</label>
-		<div class="row-main" onclick={ rowClickExpr(item) }>
+		<div
+			class="row-main"
+			if rowAvailable(item) {
+				data-action="row-activate"
+			}
+		>
 			<div class="row-title">
 				if rowAvailable(item) && item.Item.IsAudio() {
-					<span class="mi" style="font-size:15px;color:var(--accent);flex-shrink:0">audio_file</span>
+					<span class="mi row-icon audio">audio_file</span>
 				} else if item.Job.Source == "filesystem" {
-					<span class="mi" style="font-size:15px;opacity:.5;flex-shrink:0">folder</span>
+					<span class="mi row-icon local">folder</span>
 				} else {
 					<img
 						class="favicon"
 						src={ fmt.Sprintf("https://www.google.com/s2/favicons?domain=%s&sz=16", item.Job.Domain()) }
 						width="14" height="14"
-						style="border-radius:2px;flex-shrink:0"
 						onerror="this.style.visibility='hidden'"
 						loading="lazy"
 					/>
@@ -170,39 +177,37 @@ templ mediaRow(item *model.MediaItem) {
 					<span class="row-retry-note">{ retryIn(item.Job.NextRetryAt) }</span>
 				}
 				<span class="row-tag-chips">
-					<button
-						class={ "tag-chip", templ.KV("coll", false) }
-						style={ "background:var(--surface-2);color:var(--" + statusColor(item.EffectiveStatus()) + ")" }
-						onclick="event.stopPropagation()"
+					<span
+						class={ "tag-chip", "row-status", "st-" + statusColor(item.EffectiveStatus()) }
+						data-action="noop"
 						title="Статус"
-					>{ statusLabel(item.EffectiveStatus()) }</button>
+					>{ statusLabel(item.EffectiveStatus()) }</span>
 					for _, tag := range item.Tags {
 						<span
 							class="tag-chip"
 							data-tag={ tag }
-							onclick="event.stopPropagation();filterByTag(this.dataset.tag)"
+							data-action="filter-tag"
 						>
 							{ tag }
 							<button
 								class="chip-remove"
 								hx-delete={ fmt.Sprintf("jobs/%s/tags/%s", item.Job.ID, tag) }
 								hx-swap="none"
-								onclick="event.stopPropagation()"
+								data-action="noop"
 								title="Убрать тег"
 							>✕</button>
 						</span>
 					}
 					<button
-						class="tag-chip"
-						style="border-style:dashed;opacity:.7"
+						class="tag-chip add"
 						data-job-id={ item.Job.ID }
-						onclick="event.stopPropagation();addTag(this.dataset.jobId)"
+						data-action="add-tag"
 						title="Добавить тег"
 					>＋</button>
 				</span>
 			</div>
 		</div>
-		<div class="row-actions" onclick="event.stopPropagation()">
+		<div class="row-actions">
 			switch rowPrimary(item) {
 				case "cancel":
 					if item.Job.Status == model.JobRetrying {
@@ -229,7 +234,7 @@ templ mediaRow(item *model.MediaItem) {
 				case "play":
 					<button
 						class="icon-btn"
-						onclick="rowActivate(event, this.closest('.media-row'))"
+						data-action="row-play"
 						title={ map[bool]string{true:"Слушать",false:"Смотреть"}[item.Item.IsAudio()] }
 					><span class="mi">play_circle</span></button>
 				case "redownload":
@@ -241,7 +246,7 @@ templ mediaRow(item *model.MediaItem) {
 					><span class="mi">refresh</span></button>
 			}
 			<div class="row-menu-wrap">
-				<button class="icon-btn" title="Ещё" onclick="toggleMenu(event, this)">
+				<button class="icon-btn" title="Ещё" data-action="row-menu">
 					<span class="mi">more_vert</span>
 				</button>
 				<div class="row-menu">
@@ -258,25 +263,25 @@ templ mediaRow(item *model.MediaItem) {
 						<button
 							class="row-menu-item"
 							data-item-id={ item.Item.ID }
-							onclick="copyLink(this.dataset.itemId)"
+							data-action="copy-link"
 						><span class="mi">link</span>Постоянная ссылка</button>
 						<button
 							class="row-menu-item"
 							data-item-id={ item.Item.ID }
-							onclick="revokeLink(this.dataset.itemId)"
+							data-action="revoke-link"
 							title="Прежний адрес перестанет работать"
 						><span class="mi">link_off</span>Отозвать ссылку</button>
 						<button
 							class="row-menu-item"
 							data-item-id={ item.Item.ID }
 							data-name={ item.Item.Name }
-							onclick="renameFile(this.dataset.itemId, this.dataset.name)"
+							data-action="rename-file"
 							title="Переименовать"
 						><span class="mi">edit</span>Переименовать</button>
 						if item.Item.IsAudio() {
 							<button
 								class="row-menu-item"
-								onclick="openMetaFromMenu(this.closest('.media-row'))"
+								data-action="meta-open-row"
 							><span class="mi">music_note</span>Редактировать теги</button>
 						}
 					}
@@ -284,7 +289,7 @@ templ mediaRow(item *model.MediaItem) {
 						<button
 							class="row-menu-item"
 							data-url={ item.Job.URL }
-							onclick="copyURL(this.dataset.url)"
+							data-action="copy-url"
 						><span class="mi">content_copy</span>Скопировать ссылку</button>
 					}
 					if rowShowLog(item) {
@@ -292,7 +297,7 @@ templ mediaRow(item *model.MediaItem) {
 							class="row-menu-item"
 							data-job-id={ item.Job.ID }
 							data-title={ item.DisplayTitle() }
-							onclick="openLog(this.dataset.jobId, this.dataset.title)"
+							data-action="open-log"
 						><span class="mi">terminal</span>Лог скачивания</button>
 					}
 					if rowRedownloadable(item) && rowPrimary(item) != "redownload" {
@@ -315,7 +320,7 @@ templ mediaRow(item *model.MediaItem) {
 						<button
 							class="row-menu-item danger"
 							data-item-id={ item.Item.ID }
-							onclick="deleteFile(this.dataset.itemId)"
+							data-action="delete-file"
 							title="Удалить файл"
 						><span class="mi">delete</span>Удалить файл</button>
 					}
@@ -342,13 +347,6 @@ templ mediaRow(item *model.MediaItem) {
 			</div>
 		</div>
 	</div>
-}
-
-func rowClickExpr(it *model.MediaItem) templ.ComponentScript {
-	if rowAvailable(it) {
-		return templ.ComponentScript{Call: "rowActivate(event, this.closest('.media-row'))"}
-	}
-	return templ.ComponentScript{}
 }
 
 func rowAvailable(it *model.MediaItem) bool {

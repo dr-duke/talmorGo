@@ -19,9 +19,9 @@ func TestCleanFileName(t *testing.T) {
 		{"video [toolongidthatismorethan15chars].mp4", "video [toolongidthatismorethan15chars].mp4"}, // слишком длинный
 	}
 	for _, c := range cases {
-		got := cleanFileName(c.in)
+		got := CleanFileName(c.in)
 		if got != c.want {
-			t.Errorf("cleanFileName(%q) = %q, want %q", c.in, got, c.want)
+			t.Errorf("CleanFileName(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
