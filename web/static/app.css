@@ -356,6 +356,108 @@ dialog#player-dialog {
 .video-dialog-header {
   background: #111; border-color: #2a2a2a;
 }
+
+/* Полноэкранные состояния окна плеера.
+   Держим оба случая: телефон в ландшафте (окно должно занимать экран целиком,
+   как в привычных плеерах) и запасной полноэкранный режим Plyr, который иначе
+   упёрся бы в размеры самого диалога. Единицы dvh — из-за динамических панелей
+   мобильного Safari: vh там считает высоту без их учёта. */
+dialog#player-dialog.is-fullscreen,
+dialog#player-dialog:has(.plyr--fullscreen-fallback),
+dialog#player-dialog:has(.plyr--fullscreen-active) {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 0;
+}
+
+/* Телефон в горизонтальной ориентации: низкий экран плюс сенсорный ввод.
+   Одних размеров мало — под них попадает и небольшое окно браузера на
+   десктопе (headless-окно, например, 780x437), где разворачивать плеер
+   на весь экран не нужно. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  dialog#player-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+  /* Шапку ужимаем: в ландшафте по высоте дорог каждый пиксель. */
+  .video-dialog-header { padding: .2rem .4rem; }
+  .video-dialog-header .dialog-title { font-size: .8rem; }
+}
+
+/* Колонка «шапка + видео» нужна только когда окно занимает весь экран: тогда
+   высоту надо делить между ними. В обычном окне раскладку не трогаем — там
+   диалог подстраивается под содержимое, в том числе когда размеры видео ещё
+   неизвестны. */
+dialog#player-dialog.is-fullscreen[open],
+dialog#player-dialog:has(.plyr--fullscreen-fallback),
+dialog#player-dialog:has(.plyr--fullscreen-active) {
+  display: flex;
+  flex-direction: column;
+}
+dialog#player-dialog.is-fullscreen[open] > #player-wrap,
+dialog#player-dialog:has(.plyr--fullscreen-fallback) > #player-wrap,
+dialog#player-dialog:has(.plyr--fullscreen-active) > #player-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Видео вписываем по высоте: Plyr держит собственную обёртку с фиксированной
+   пропорцией, и без этих правил ролик тянется по ширине, вылезает за экран
+   и выталкивает шапку. */
+dialog#player-dialog.is-fullscreen[open] .plyr,
+dialog#player-dialog.is-fullscreen[open] .plyr__video-wrapper,
+dialog#player-dialog:has(.plyr--fullscreen-fallback) .plyr,
+dialog#player-dialog:has(.plyr--fullscreen-fallback) .plyr__video-wrapper,
+dialog#player-dialog:has(.plyr--fullscreen-active) .plyr,
+dialog#player-dialog:has(.plyr--fullscreen-active) .plyr__video-wrapper {
+  height: 100%;
+  max-height: 100%;
+}
+dialog#player-dialog.is-fullscreen[open] video,
+dialog#player-dialog:has(.plyr--fullscreen-fallback) video,
+dialog#player-dialog:has(.plyr--fullscreen-active) video {
+  height: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* Телефон в горизонтальной ориентации: низкий экран плюс сенсорный ввод.
+   Одних размеров мало — под них попадает и небольшое окно браузера на
+   десктопе (headless-окно, например, 780x437), где разворачивать плеер
+   на весь экран не нужно. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  dialog#player-dialog[open] {
+    display: flex;
+    flex-direction: column;
+  }
+  dialog#player-dialog[open] > #player-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  dialog#player-dialog .plyr,
+  dialog#player-dialog .plyr__video-wrapper {
+    height: 100%;
+    max-height: 100%;
+  }
+  dialog#player-dialog video {
+    height: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+}
 .video-dialog-header .icon-btn { color: #aaa; }
 .video-dialog-header .icon-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
 #player-wrap { overflow: hidden; background: #000; }

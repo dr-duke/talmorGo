@@ -111,7 +111,9 @@ function openVideo(stream, title) {
     autoplay: true,
     controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'captions', 'fullscreen'],
     keyboard: { focused: true, global: false },
-    fullscreen: { enabled: true, fallback: true, iosNative: false },
+    // iOS не умеет Fullscreen API для произвольных элементов: там
+    // разворачивает только нативный плеер, и включает его именно iosNative.
+    fullscreen: { enabled: true, fallback: true, iosNative: true },
   });
 
   // play() зовём сразу, внутри жеста пользователя, иначе браузер откажет.
