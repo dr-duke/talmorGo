@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Диагностика вьюпорта</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:1rem; }
+  h1 { font-size: 1rem; color:#7b93c8; margin:0 0 .75rem; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:.35rem .4rem; border-bottom:1px solid #2c2c36; vertical-align:top; }
+  td:first-child { color:#8a8a9a; }
+  td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+  .yes { color:#5aab7a; font-weight:600; }
+  .no  { color:#d4665a; font-weight:600; }
+  .hint { color:#8a8a9a; font-size:.8rem; margin-top:.75rem; }
+</style>
+<h1>Диагностика вьюпорта — поверните телефон горизонтально</h1>
+<table id="out"></table>
+<p class="hint">Страница обновляется сама при повороте. Пришлите снимок экрана в горизонтальной ориентации.</p>
+<script>
+const queries = {
+  'ориентация горизонтальная': '(orientation: landscape)',
+  'высота ≤ 500px': '(max-height: 500px)',
+  'высота ≤ 600px': '(max-height: 600px)',
+  'сенсорный ввод (pointer: coarse)': '(pointer: coarse)',
+  'нет наведения (hover: none)': '(hover: none)',
+  'ТЕКУЩЕЕ ПРАВИЛО ПЛЕЕРА': '(orientation: landscape) and (max-height: 500px) and (pointer: coarse)',
+};
+
+function render() {
+  const rows = [
+    ['innerWidth × innerHeight', `${innerWidth} × ${innerHeight}`],
+    ['screen.width × height', `${screen.width} × ${screen.height}`],
+    ['devicePixelRatio', devicePixelRatio],
+    ['maxTouchPoints', navigator.maxTouchPoints],
+    ['screen.orientation', (screen.orientation && screen.orientation.type) || '(нет)'],
+    ['поддержка dvh', CSS.supports('height', '100dvh') ? 'да' : 'нет'],
+    ['поддержка :has()', CSS.supports('selector(:has(*))') ? 'да' : 'нет'],
+  ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`);
+
+  for (const [label, q] of Object.entries(queries)) {
+    const ok = matchMedia(q).matches;
+    rows.push(`<tr><td>${label}</td><td class="${ok ? 'yes' : 'no'}">${ok ? 'ДА' : 'НЕТ'}</td></tr>`);
+  }
+  document.getElementById('out').innerHTML = rows.join('');
+}
+
+render();
+addEventListener('resize', render);
+addEventListener('orientationchange', () => setTimeout(render, 300));
+</script>

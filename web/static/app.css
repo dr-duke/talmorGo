@@ -377,7 +377,7 @@ dialog#player-dialog:has(.plyr--fullscreen-active) {
    Одних размеров мало — под них попадает и небольшое окно браузера на
    десктопе (headless-окно, например, 780x437), где разворачивать плеер
    на весь экран не нужно. */
-@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+@media (orientation: landscape) and (max-height: 600px) and (pointer: coarse) {
   dialog#player-dialog {
     width: 100vw;
     max-width: 100vw;
@@ -435,7 +435,7 @@ dialog#player-dialog:has(.plyr--fullscreen-active) video {
    Одних размеров мало — под них попадает и небольшое окно браузера на
    десктопе (headless-окно, например, 780x437), где разворачивать плеер
    на весь экран не нужно. */
-@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+@media (orientation: landscape) and (max-height: 600px) and (pointer: coarse) {
   dialog#player-dialog[open] {
     display: flex;
     flex-direction: column;
