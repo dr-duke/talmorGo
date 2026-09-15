@@ -311,9 +311,16 @@ func (r *sqliteJobRepo) ConfirmSingle(ctx context.Context, id string) error {
 	return err
 }
 
-func (r *sqliteJobRepo) DeleteChecking(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id=? AND status='checking'`, id)
-	return err
+func (r *sqliteJobRepo) DeleteChecking(ctx context.Context, id string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id=? AND status='checking'`, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // ListChecking возвращает задания, зависшие в статусе checking (проверка на плейлист

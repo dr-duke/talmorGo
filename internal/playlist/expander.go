@@ -83,8 +83,17 @@ func (e *Expander) ResolvePlaceholder(ctx context.Context, placeholderID, rawURL
 	}
 
 	// Плейлист: удаляем placeholder и создаём индивидуальные задания.
-	if err := e.Jobs.DeleteChecking(ctx, placeholderID); err != nil {
+	// Удаление заодно служит проверкой на отмену: если заготовки в статусе
+	// checking уже нет, пользователь успел нажать «Отменить», пока шла
+	// проверка, — и создавать сотню заданий вопреки отмене нельзя.
+	deleted, err := e.Jobs.DeleteChecking(ctx, placeholderID)
+	if err != nil {
 		slog.Error("playlist: delete checking placeholder", "id", placeholderID, "err", err)
+		return Result{}
+	}
+	if !deleted {
+		slog.Info("playlist: разворачивание отменено", "id", placeholderID)
+		return Result{}
 	}
 	created := e.CreateJobs(ctx, info, source, chatID)
 	return Result{IsPlaylist: true, PlaylistTitle: info.PlaylistTitle, Created: created}

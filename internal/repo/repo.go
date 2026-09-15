@@ -68,7 +68,10 @@ type JobRepo interface {
 	Cancel(ctx context.Context, id string) error
 	CancelAll(ctx context.Context) (int64, error)
 	ConfirmSingle(ctx context.Context, id string) error
-	DeleteChecking(ctx context.Context, id string) error
+	// DeleteChecking удаляет заготовку, только пока она в статусе checking.
+	// Признак удаления показывает, не отменил ли пользователь задание, пока шла
+	// проверка: если строки уже нет, разворачивать плейлист не нужно.
+	DeleteChecking(ctx context.Context, id string) (bool, error)
 	// ListChecking возвращает задания, зависшие на проверке плейлиста после рестарта.
 	ListChecking(ctx context.Context) ([]*model.Job, error)
 	Hide(ctx context.Context, id string) error
