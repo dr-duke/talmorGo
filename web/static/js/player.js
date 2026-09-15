@@ -270,9 +270,12 @@ function seek(event) {
 // зависит от того, как конкретный браузер трактует pointer/max-height.
 function isPhoneLandscape() {
   const landscape = window.innerWidth > window.innerHeight;
-  const touch = (navigator.maxTouchPoints || 0) > 0;
   const short = window.innerHeight <= 600;
-  return landscape && touch && short;
+  // Сенсорность спрашиваем у медиазапроса: navigator.maxTouchPoints в WebKit
+  // возвращает 0 даже на мобильном, и проверка по нему молча не срабатывала.
+  const touch = window.matchMedia('(pointer: coarse)').matches
+    || (navigator.maxTouchPoints || 0) > 0;
+  return landscape && short && touch;
 }
 
 // applyFullscreenLayout включает разметку «во весь экран» для окна плеера.
