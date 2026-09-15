@@ -39,14 +39,27 @@ async function fetchPlaylist() {
 async function playAll() {
   playlist = await fetchPlaylist();
   playlistIndex = 0;
-  if (playlist.length) open(playlist[0].stream, playlist[0].title, 'video');
+  if (playlist.length) {
+    const first = playlist[0];
+    open(first.stream, first.title, 'video', first.id);
+  }
 }
 
 function playNext() {
   if (playlistIndex < 0 || playlistIndex >= playlist.length - 1) return;
   playlistIndex += 1;
   const next = playlist[playlistIndex];
-  open(next.stream, next.title, 'video');
+  open(next.stream, next.title, 'video', next.id);
+}
+
+// syncPlaylistIndex находит позицию в очереди по идентификатору элемента.
+// Раньше позиция искалась сравнением адресов потока, но сервер отдаёт
+// абсолютный путь (с BASE_PATH), а разметка строки — относительный, поэтому
+// совпадения не было никогда: очередь всегда продолжалась со второго элемента
+// библиотеки, а не со следующего за выбранным.
+function syncPlaylistIndex(itemId) {
+  const idx = itemId ? playlist.findIndex((p) => p.id === itemId) : -1;
+  playlistIndex = idx >= 0 ? idx : 0;
 }
 
 // ── Открытие ─────────────────────────────────────────────────────────────────
@@ -60,13 +73,21 @@ async function activateRow(target) {
   if (!row?.dataset.stream) return;
 
   const rowKind = row.dataset.kind || 'video';
+  const itemId = row.dataset.itemId || '';
+
+  // Плеер открываем синхронно, не дожидаясь плейлиста: await до этого выводил
+  // выполнение из обработчика клика, жест пользователя считался истраченным, и
+  // Safari на iPhone отклонял автовоспроизведение — первое видео вставало на
+  // паузу и требовало второго касания.
+  open(row.dataset.stream, row.dataset.title, rowKind, itemId);
+
   if (rowKind === 'video' && !playlist.length) {
     playlist = await fetchPlaylist();
+    syncPlaylistIndex(itemId);
   }
-  open(row.dataset.stream, row.dataset.title, rowKind);
 }
 
-function open(stream, title, mediaKind) {
+function open(stream, title, mediaKind, itemId) {
   if (kind !== null && kind !== mediaKind) teardown();
   kind = mediaKind;
 
@@ -76,8 +97,7 @@ function open(stream, title, mediaKind) {
   if (icon) icon.textContent = mediaKind === 'audio' ? 'audio_file' : 'movie';
 
   if (mediaKind === 'video') {
-    const idx = playlist.findIndex((p) => p.stream === stream);
-    playlistIndex = idx >= 0 ? idx : 0;
+    syncPlaylistIndex(itemId);
     openVideo(stream, title);
   } else {
     openAudio(stream);

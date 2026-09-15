@@ -87,7 +87,13 @@ func (s *Service) TagCloud(ctx context.Context, f model.MediaFilter) ([]*model.T
 }
 
 // PlaylistEntry — элемент серверного плейлиста для «Воспроизвести всё».
+//
+// ID нужен фронтенду, чтобы найти текущую позицию в очереди. Раньше он искал
+// её сравнением адресов потока, но здесь адрес абсолютный (с BASE_PATH), а в
+// разметке строки — относительный, поэтому совпадение не находилось никогда и
+// очередь всегда съезжала на второй элемент библиотеки.
 type PlaylistEntry struct {
+	ID     string `json:"id"`
 	Stream string `json:"stream"`
 	Title  string `json:"title"`
 }
@@ -107,6 +113,7 @@ func (s *Service) Playlist(ctx context.Context, f model.MediaFilter, basePath st
 			continue
 		}
 		out = append(out, PlaylistEntry{
+			ID:     mi.Item.ID,
 			Stream: basePath + "/items/" + mi.Item.ID + "/stream",
 			Title:  mi.DisplayTitle(),
 		})

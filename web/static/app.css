@@ -618,12 +618,17 @@ body.has-player #toast           { bottom: calc(64px + 1.5rem); }
   transform: translateX(-50%) translateY(140%);
   background: var(--text); color: var(--bg);
   padding: .55rem 1.1rem; border-radius: 8px;
-  font-size: .8125rem; white-space: nowrap;
+  font-size: .8125rem;
+  /* Текст ошибки приходит с сервера и бывает длинным: nowrap уводил его за
+     край экрана, на телефоне читалась только середина строки. */
+  white-space: pre-line; word-break: break-word;
+  max-width: min(92vw, 34rem); text-align: center;
   box-shadow: 0 4px 12px rgba(0,0,0,.3);
   transition: transform .22s ease, opacity .22s ease;
   opacity: 0; pointer-events: none; z-index: 9999;
 }
 #toast.visible { transform: translateX(-50%) translateY(0); opacity: 1; }
+#toast.toast-error { background: var(--danger, #b3261e); color: #fff; text-align: left; }
 
 /* Prevent scrollbar from causing body hscroll */
 .app-shell { overflow-x: hidden; }
