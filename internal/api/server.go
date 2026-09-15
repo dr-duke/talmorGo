@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"io/fs"
 	"net/http"
 	"strings"
 
@@ -50,9 +49,9 @@ func New(d Deps) *Server {
 	}
 	ah := &handler.AuthHandler{Token: cfg.WebToken, BasePath: basePath, SiteName: cfg.SiteName}
 
-	// Статика.
-	staticSub, _ := fs.Sub(web.StaticFiles, "static")
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+	// Статика: с ETag и обязательной перепроверкой, иначе браузер держит
+	// устаревшие стили и скрипты (см. web.StaticHandler).
+	mux.Handle("GET /static/", http.StripPrefix("/static/", web.StaticHandler()))
 
 	// Главная страница.
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
