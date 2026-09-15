@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -125,6 +126,37 @@ func (p *Pool) CancelJob(jobID string) bool {
 		fn()
 	}
 	return ok
+}
+
+// reserveFreePath атомарно занимает имя в каталоге медиатеки, при совпадении
+// подбирая следующее свободное: «Имя.mp4», «Имя (2).mp4» и так далее.
+//
+// Раньше путь собирался напрямую из заголовка видео, и os.Rename молча затирал
+// чужой файл: два ролика с одинаковым заголовком — и содержимое первого
+// потеряно безвозвратно. Проверка через Stat здесь не годится — между ней и
+// переносом успевает вклиниться второй воркер, поэтому имя занимается
+// созданием файла с O_EXCL, а перенос уже пишет поверх собственной заглушки.
+func reserveFreePath(dir, name string) (string, error) {
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	if base == "" {
+		base = "file"
+	}
+	for i := 1; i <= 1000; i++ {
+		candidate := filepath.Join(dir, name)
+		if i > 1 {
+			candidate = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", base, i, ext))
+		}
+		f, err := os.OpenFile(candidate, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			f.Close() //nolint:errcheck // пустая заглушка, ниже её заменит перенос
+			return candidate, nil
+		}
+		if !os.IsExist(err) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("не нашлось свободного имени для %q", name)
 }
 
 func moveFile(src, dst string) error {
@@ -261,9 +293,15 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 			continue
 		}
 
-		finalPath := filepath.Join(p.cfg.YtDlpOutputDir, event.FileName)
+		finalPath, err := reserveFreePath(p.cfg.YtDlpOutputDir, event.FileName)
+		if err != nil {
+			lastErr = fmt.Errorf("подбор имени для %s: %w", event.FileName, err)
+			slog.Error("worker: reserve final path", "name", event.FileName, "err", err)
+			continue
+		}
 		p.inFlight.Add(finalPath)
 		if err := moveFile(event.Path, finalPath); err != nil {
+			os.Remove(finalPath) //nolint:errcheck // снимаем занятую заглушку
 			p.inFlight.Remove(finalPath)
 			lastErr = fmt.Errorf("move %s: %w", event.FileName, err)
 			slog.Error("worker: move file from staging", "src", event.Path, "dst", finalPath, "err", err)
@@ -281,8 +319,10 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 			JobID: job.ID,
 			Kind:  "video",
 			Path:  finalPath,
-			Name:  event.FileName,
-			Size:  info.Size(),
+			// Имя берём из фактического пути: при совпадении заголовков
+			// reserveFreePath подобрал соседнее свободное.
+			Name: filepath.Base(finalPath),
+			Size: info.Size(),
 		}
 		if err := p.itemRepo.Create(ctx, item); err != nil {
 			p.inFlight.Remove(finalPath)

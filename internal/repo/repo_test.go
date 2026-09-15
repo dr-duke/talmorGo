@@ -535,3 +535,88 @@ func TestTagRepo_CountsRespectKind(t *testing.T) {
 		}
 	}
 }
+
+// TestTagRepo_PruneOrphansKeepsEmptyCollection проверяет, что переиндексация не
+// уничтожает только что созданную пустую подборку. Create заводит коллекцию без
+// тега — тег появляется лишь в AddJobs, — поэтому прежнее условие «коллекции без
+// активных заданий» накрывало любую пустую коллекцию, и пользователь терял её
+// без единого сообщения. Существующий тест этого не ловил, так как коллекций
+// вообще не заводил.
+func TestTagRepo_PruneOrphansKeepsEmptyCollection(t *testing.T) {
+	database := openTestDB(t)
+	tagRepo := repo.NewTagRepo(database)
+	colRepo := repo.NewCollectionRepo(database)
+	ctx := context.Background()
+
+	created, err := colRepo.Create(ctx, "Отпуск 2026")
+	if err != nil {
+		t.Fatalf("create collection: %v", err)
+	}
+
+	if _, _, nCollections, err := tagRepo.PruneOrphans(ctx); err != nil {
+		t.Fatalf("PruneOrphans: %v", err)
+	} else if nCollections != 0 {
+		t.Errorf("удалено коллекций: %d; пустая подборка — не мусор", nCollections)
+	}
+
+	list, err := colRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list collections: %v", err)
+	}
+	for _, c := range list {
+		if c.ID == created.ID {
+			return
+		}
+	}
+	t.Fatal("пустая коллекция удалена переиндексацией")
+}
+
+// TestItemRepo_CreateReassignsJobOnPathConflict проверяет, что файл по уже
+// занятому пути переходит к новому заданию. Раньше ON CONFLICT обновлял всё
+// кроме job_id: файл оставался за первым заданием, второе получало «готово» с
+// нулём файлов и выпадало из обеих половин запроса медиатеки — строку нельзя
+// было ни увидеть, ни скрыть, ни удалить.
+func TestItemRepo_CreateReassignsJobOnPathConflict(t *testing.T) {
+	database := openTestDB(t)
+	jobRepo := repo.NewJobRepo(database)
+	itemRepo := repo.NewItemRepo(database)
+	ctx := context.Background()
+
+	jobA := &model.Job{URL: "https://example.com/a", Status: model.JobDone, Source: "web"}
+	if err := jobRepo.Create(ctx, jobA); err != nil {
+		t.Fatalf("create job A: %v", err)
+	}
+	jobB := &model.Job{URL: "https://example.com/b", Status: model.JobDone, Source: "web"}
+	if err := jobRepo.Create(ctx, jobB); err != nil {
+		t.Fatalf("create job B: %v", err)
+	}
+
+	const path = "/data/Интервью.mp4"
+	first := &model.Item{JobID: jobA.ID, Kind: "video", Path: path, Name: "Интервью.mp4", Size: 10}
+	if err := itemRepo.Create(ctx, first); err != nil {
+		t.Fatalf("create item A: %v", err)
+	}
+	second := &model.Item{JobID: jobB.ID, Kind: "video", Path: path, Name: "Интервью.mp4", Size: 20}
+	if err := itemRepo.Create(ctx, second); err != nil {
+		t.Fatalf("create item B: %v", err)
+	}
+
+	ofB, err := itemRepo.ListByJobID(ctx, jobB.ID)
+	if err != nil {
+		t.Fatalf("list by job B: %v", err)
+	}
+	if len(ofB) != 1 {
+		t.Fatalf("у второго задания %d файлов, ожидался 1 — задание исчезло бы из медиатеки", len(ofB))
+	}
+	if ofB[0].Size != 20 {
+		t.Errorf("размер не обновлён: %d", ofB[0].Size)
+	}
+
+	ofA, err := itemRepo.ListByJobID(ctx, jobA.ID)
+	if err != nil {
+		t.Fatalf("list by job A: %v", err)
+	}
+	if len(ofA) != 0 {
+		t.Errorf("файл остался и за первым заданием: %d", len(ofA))
+	}
+}

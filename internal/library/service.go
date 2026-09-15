@@ -11,6 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"os"
 
 	"github.com/dr-duke/talmorGo/internal/config"
 	"github.com/dr-duke/talmorGo/internal/model"
@@ -161,7 +163,17 @@ func (s *Service) RenameItem(ctx context.Context, id, newName string) error {
 	if err != nil {
 		return err
 	}
-	return s.Items.Rename(ctx, id, newName, newPath)
+	if err := s.Items.Rename(ctx, id, newName, newPath); err != nil {
+		// Возвращаем файл на место: иначе запись указывает на старый путь, где
+		// файла уже нет, и элемент вскоре помечается потерянным — при том что
+		// пользователю показана ошибка «переименование не удалось».
+		if rbErr := os.Rename(newPath, item.Path); rbErr != nil {
+			slog.Error("library: откат переименования не удался",
+				"from", newPath, "to", item.Path, "err", rbErr)
+		}
+		return err
+	}
+	return nil
 }
 
 // CreateLink возвращает постоянную ссылку на элемент. Базой служит LinkBase,

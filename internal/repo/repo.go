@@ -99,8 +99,9 @@ type TagRepo interface {
 	AddToJob(ctx context.Context, jobID, tagID string) error
 	BulkAddToJobs(ctx context.Context, tagID string, jobIDs []string) error
 	RemoveFromJob(ctx context.Context, jobID, tagName string) error
-	// PruneOrphans удаляет оборванные job_tags, пустые теги и пустые коллекции.
-	// Возвращает количество удалённых: привязок, тегов, коллекций.
+	// PruneOrphans удаляет оборванные job_tags и пустые теги. Сами коллекции не
+	// трогает: это пользовательская сущность, и пустая подборка — не мусор.
+	// Возвращает количество удалённых: привязок, тегов, коллекций (всегда 0).
 	PruneOrphans(ctx context.Context) (nJobTags, nTags, nCollections int, err error)
 }
 

@@ -34,25 +34,29 @@ func (r *sqliteItemRepo) Create(ctx context.Context, item *model.Item) error {
 	}
 	// Файл по тому же пути появился снова: снимаем пометки об удалении и пропаже,
 	// иначе восстановленный файл остаётся в медиатеке в статусе «удалён».
-	_, err := r.db.ExecContext(ctx,
+	// job_id при конфликте тоже переносится. Раньше он не обновлялся, и файл
+	// оставался за первым заданием: второе получало статус «готово» с нулём
+	// файлов и выпадало из обеих половин запроса медиатеки — строку нельзя было
+	// ни увидеть, ни скрыть, ни удалить.
+	//
+	// Фактический ID возвращаем через RETURNING, а не отдельным SELECT по пути:
+	// так значение приходит из той же операции и не зависит от чужих записей.
+	return r.db.WriteRowContext(ctx,
 		`INSERT INTO items (id, job_id, kind, path, name, size, duration,
 		                    title, artist, album, year, genre, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(path) DO UPDATE SET
+		     job_id=excluded.job_id,
 		     name=excluded.name, size=excluded.size, duration=excluded.duration,
 		     title=excluded.title, artist=excluded.artist, album=excluded.album,
 		     year=excluded.year, genre=excluded.genre,
-		     deleted_at=NULL, lost_at=NULL`,
+		     deleted_at=NULL, lost_at=NULL
+		 RETURNING id`,
 		item.ID, nullStr(item.JobID), item.Kind, item.Path, item.Name,
 		item.Size, item.Duration,
 		item.Meta.Title, item.Meta.Artist, item.Meta.Album, item.Meta.Year, item.Meta.Genre,
 		item.CreatedAt.Format(time.RFC3339Nano),
-	)
-	if err != nil {
-		return err
-	}
-	// Читаем обратно фактический ID (может отличаться при конфликте по пути).
-	return r.db.QueryRowContext(ctx, `SELECT id FROM items WHERE path=?`, item.Path).Scan(&item.ID)
+	).Scan(&item.ID)
 }
 
 func (r *sqliteItemRepo) GetByID(ctx context.Context, id string) (*model.Item, error) {
