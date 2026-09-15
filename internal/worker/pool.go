@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -318,15 +319,20 @@ func (p *Pool) process(ctx context.Context, job *model.Job) {
 		return
 	}
 
-	if lastErr != nil && firstItem == nil {
+	// Ни одного файла — всегда сбой, даже когда загрузчик не сообщил ошибку.
+	// Раньше этот случай проваливался в «готово»: так выглядели истёкший
+	// таймаут и оборванное чтение вывода, и задание оказывалось завершённым с
+	// пустой медиатекой, пустым полем ошибки и без права на повтор.
+	if firstItem == nil {
+		if lastErr == nil {
+			lastErr = errors.New("загрузчик завершился, не вернув ни одного файла")
+		}
 		p.handleFailure(ctx, job, lastErr)
 		return
 	}
 
 	job.Status = model.JobDone
-	if firstItem != nil {
-		job.Title = firstItem.Name
-	}
+	job.Title = firstItem.Name
 	if err := p.jobRepo.Update(ctx, job); err != nil {
 		slog.Error("worker: update job done", "err", err)
 	}

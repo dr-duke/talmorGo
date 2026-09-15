@@ -47,6 +47,7 @@ func FetchPlaylist(ctx context.Context, url string, opts Options) *PlaylistInfo 
 	args = append(args, url)
 
 	cmd := exec.CommandContext(ctx, opts.Binary, args...)
+	setupProcessGroup(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		slog.Debug("downloader: flat-playlist failed", "url", url, "err", err)

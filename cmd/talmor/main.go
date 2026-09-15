@@ -100,10 +100,7 @@ func main() {
 		Cfg: cfg, Lib: libSvc, Queue: queueSvc,
 		Settings: settingsProvider, Cookies: cookieRepo, Hub: hub,
 	})
-	httpServer := &http.Server{
-		Addr:    cfg.HTTPHost + ":" + cfg.HTTPPort,
-		Handler: srv.Handler(),
-	}
+	httpServer := newHTTPServer(cfg.HTTPHost+":"+cfg.HTTPPort, srv.Handler())
 
 	checker := worker.NewFileChecker(itemRepo, cfg.FileCheckInterval)
 	dirScanner := worker.NewDirScanner(jobRepo, itemRepo, cfg.YtDlpOutputDir, cfg.DirScanInterval, pool.InFlight())
