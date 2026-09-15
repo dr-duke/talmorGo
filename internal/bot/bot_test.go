@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/dr-duke/talmorGo/internal/repo"
 	"github.com/dr-duke/talmorGo/internal/settings"
 	"github.com/dr-duke/talmorGo/internal/storage"
+	"github.com/dr-duke/talmorGo/internal/worker"
 )
 
 // fakeAPI записывает всё, что бот отправляет в Telegram.
@@ -344,5 +346,113 @@ func TestBot_EscapesHTMLInSearchQuery(t *testing.T) {
 	}
 	if strings.Contains(texts[0], "<script>") {
 		t.Errorf("HTML не экранирован: %q", texts[0])
+	}
+}
+
+// TestIsAllowed_GroupChatAndSender проверяет согласованность проверки доступа.
+// Сообщения сверялись по Chat.ID, а нажатия кнопок — по From.ID. В личной
+// переписке это одно и то же число, поэтому расхождение не было видно; в
+// группе они разные, и бот, добавленный в группу с её chat_id в списке (как
+// предписывает спецификация), обрабатывал сообщения, но на любое нажатие
+// кнопки отвечал «доступ запрещён».
+func TestIsAllowed_GroupChatAndSender(t *testing.T) {
+	const groupID int64 = -1001234567890
+	const memberID int64 = 555
+
+	b := &Bot{cfg: &config.Config{TelegramAllowedIDs: []int64{groupID}}}
+
+	if !b.isAllowed(groupID, memberID) {
+		t.Error("сообщение в разрешённой группе отклонено")
+	}
+	// Ровно тот случай, что был сломан: у кнопки известен личный id участника,
+	// а разрешена группа.
+	if !b.isAllowed(memberID, groupID) {
+		t.Error("нажатие кнопки в разрешённой группе отклонено")
+	}
+	if b.isAllowed(999, 888) {
+		t.Error("посторонние идентификаторы пропущены")
+	}
+	// Нулевые значения не должны считаться совпадением.
+	if b.isAllowed(0, 0) {
+		t.Error("нулевые идентификаторы пропущены")
+	}
+}
+
+// TestHandleQueue_FitsTelegramLimit: список очереди обязан укладываться в
+// лимит Telegram. Раньше он склеивался целиком, и на плейлисте из ста роликов
+// сообщение переваливало за 10 КБ — Telegram отвергал его, и в чате не
+// появлялось ничего. Имена берём враждебные: escapeHTML раздувает «&» в пять
+// символов, поэтому ограничения по числу строк было бы недостаточно.
+func TestHandleQueue_FitsTelegramLimit(t *testing.T) {
+	e := newBotEnv(t)
+	ctx := context.Background()
+
+	for i := 0; i < 100; i++ {
+		job := &model.Job{
+			URL:    fmt.Sprintf("https://example.com/v%d", i),
+			Title:  strings.Repeat("&", 45),
+			Status: model.JobPending,
+			Source: "telegram",
+			ChatID: 100,
+		}
+		if err := e.jobs.Create(ctx, job); err != nil {
+			t.Fatalf("create job %d: %v", i, err)
+		}
+	}
+
+	e.bot.handleQueue(ctx, 100)
+
+	texts := e.api.texts()
+	if len(texts) != 1 {
+		t.Fatalf("отправлено сообщений: %d, ожидалось 1", len(texts))
+	}
+	if n := len([]rune(texts[0])); n > tgMessageLimit {
+		t.Errorf("длина сообщения %d символов — Telegram отвергнет его целиком", n)
+	}
+	if !strings.Contains(texts[0], "и ещё") {
+		t.Error("нет пометки об усечении: пользователь не узнает, что список неполный")
+	}
+}
+
+// TestNotify_PlaylistChildReportsFailure: у заданий из плейлиста TgMessageID не
+// заполняется, и ветки уведомлений выходили раньше времени — об упавших
+// роликах пользователь не узнавал вовсе. Теперь отправляется новое сообщение,
+// а его id запоминается, чтобы следующие повторы правили его, а не сыпали
+// новыми сообщениями.
+func TestNotify_PlaylistChildReportsFailure(t *testing.T) {
+	e := newBotEnv(t)
+	ctx := context.Background()
+
+	job := &model.Job{
+		URL:    "https://example.com/dead",
+		Status: model.JobFailed,
+		Source: "telegram",
+		ChatID: 100,
+	}
+	if err := e.jobs.Create(ctx, job); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if job.TgMessageID != 0 {
+		t.Fatalf("у задания из плейлиста не должно быть id сообщения, получено %d", job.TgMessageID)
+	}
+
+	e.bot.Notify(ctx, worker.Notification{
+		Kind:    worker.NotifJobFailed,
+		ChatID:  job.ChatID,
+		JobID:   job.ID,
+		JobURL:  job.URL,
+		ErrText: "video unavailable",
+	})
+
+	if !e.api.containing("Ошибка скачивания") {
+		t.Error("сообщение об ошибке не отправлено — пользователь не узнает о потерянном ролике")
+	}
+
+	saved, err := e.jobs.GetByID(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if saved.TgMessageID == 0 {
+		t.Error("id сообщения не сохранён: следующий повтор пришлёт ещё одно сообщение вместо правки")
 	}
 }
