@@ -3,6 +3,7 @@ package downloader
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -50,10 +51,15 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 		if deadline <= 0 {
 			deadline = 5 * time.Minute
 		}
-		ctx, cancel := context.WithTimeout(ctx, deadline)
+		// Родительский контекст сохраняем отдельно: только по нему можно
+		// отличить отмену вызывающим от собственного дедлайна. Раньше оба
+		// случая были неразличимы, и истёкший таймаут молча выдавался за успех.
+		parentCtx := ctx
+		runCtx, cancel := context.WithTimeout(ctx, deadline)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, opts.Binary, args...)
+		cmd := exec.CommandContext(runCtx, opts.Binary, args...)
+		setupProcessGroup(cmd)
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
@@ -74,6 +80,9 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 		filePattern := buildFilePattern(opts.OutputDir)
 
 		const maxLogLines = 2000
+		// Предел на строку у bufio.Scanner по умолчанию 64 КБ: строка длиннее
+		// обрывала чтение молча, и все последующие имена файлов терялись.
+		const maxScanLine = 1 << 20
 
 		var (
 			mu        sync.Mutex
@@ -89,6 +98,7 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 		go func() {
 			defer wg.Done()
 			s := bufio.NewScanner(stdout)
+			s.Buffer(make([]byte, 0, 64*1024), maxScanLine)
 			for s.Scan() {
 				text := s.Text()
 				if filePattern.MatchString(text) {
@@ -108,12 +118,16 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 					mu.Unlock()
 				}
 			}
+			if err := s.Err(); err != nil {
+				ch <- Event{Err: fmt.Errorf("чтение вывода yt-dlp: %w", err)}
+			}
 		}()
 
 		// stderr: логируем в slog и накапливаем для хранения в БД.
 		go func() {
 			defer wg.Done()
 			s := bufio.NewScanner(stderr)
+			s.Buffer(make([]byte, 0, 64*1024), maxScanLine)
 			for s.Scan() {
 				text := s.Text()
 				slog.Info("yt-dlp stderr", "line", text)
@@ -122,6 +136,9 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 					logLines = append(logLines, text)
 				}
 				mu.Unlock()
+			}
+			if err := s.Err(); err != nil {
+				slog.Warn("downloader: чтение stderr прервано", "err", err)
 			}
 		}()
 
@@ -139,9 +156,22 @@ func Run(ctx context.Context, url string, opts Options) <-chan Event {
 			ch <- Event{Log: fullLog}
 		}
 
-		// Сигнализируем ошибку только если не скачали ни одного файла.
-		// При частичном успехе (--no-abort-on-error) файлы уже отправлены выше.
-		if cmdErr != nil && ctx.Err() == nil && count == 0 {
+		switch {
+		case parentCtx.Err() != nil:
+			// Отмена вызывающим или остановка приложения — не ошибка загрузки:
+			// статус задания проставляется выше по стеку.
+
+		case errors.Is(runCtx.Err(), context.DeadlineExceeded):
+			// Собственный дедлайн. Раньше он попадал в ту же ветку, что и
+			// отмена, поэтому наверх не уходило ничего: пул видел «ни файлов,
+			// ни ошибки» и записывал заданию «готово». Сообщаем всегда, даже
+			// когда часть файлов скачалась, — пул сам решит, что это частичный
+			// успех, а текст осядет в логе задания.
+			ch <- Event{Err: fmt.Errorf("превышен таймаут %s, процесс остановлен", deadline)}
+
+		case cmdErr != nil && count == 0:
+			// Ошибка только при полном провале: при частичном успехе
+			// (--no-abort-on-error) файлы уже отправлены выше.
 			if errMsg == "" {
 				errMsg = cmdErr.Error()
 			}

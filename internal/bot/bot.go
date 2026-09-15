@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,6 +65,13 @@ func New(cfg *config.Config, jobs repo.JobRepo, tokens repo.TokenRepo, q *queue.
 	api.Debug = cfg.TelegramDebug
 
 	slog.Info("bot: authorized", "username", api.Self.UserName)
+
+	// Предупреждаем один раз при старте, а не на каждое сообщение: в прежнем
+	// виде строка тонула в потоке логов именно тогда, когда была важнее всего.
+	if len(cfg.TelegramAllowedIDs) == 0 {
+		slog.Warn("bot: TELEGRAM_ALLOWED_IDS не задан — бот принимает ссылки от любого, " +
+			"кто узнает его имя")
+	}
 
 	b := &Bot{
 		cfg: cfg, api: api, poller: api, jobs: jobs, tokens: tokens, queue: q,
@@ -133,15 +141,13 @@ func (b *Bot) Notify(ctx context.Context, n worker.Notification) {
 		}
 
 	case worker.NotifJobFailed:
-		// Редактируем сообщение очереди → «ошибка».
-		if n.MessageID == 0 {
-			return
-		}
+		// Правим сообщение очереди → «ошибка», а при его отсутствии отправляем
+		// новое (см. editOrSend).
 		errShort := n.ErrText
 		if len([]rune(errShort)) > 200 {
 			errShort = string([]rune(errShort)[:197]) + "…"
 		}
-		b.editMsg(n.ChatID, int(n.MessageID),
+		b.editOrSend(ctx, n,
 			"❌ <b>Ошибка скачивания</b>\n"+escapeHTML(shortenMsg(n.JobURL))+"\n\n<code>"+escapeHTML(errShort)+"</code>",
 			tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(
@@ -151,11 +157,9 @@ func (b *Bot) Notify(ctx context.Context, n worker.Notification) {
 		)
 
 	case worker.NotifJobRetrying:
-		// Редактируем сообщение очереди → «повтор через…».
-		if n.MessageID == 0 {
-			return
-		}
-		b.editMsg(n.ChatID, int(n.MessageID),
+		// Правим сообщение очереди → «повтор через…», а при его отсутствии
+		// отправляем новое.
+		b.editOrSend(ctx, n,
 			"🔄 <b>Повтор "+n.RetryAt+"</b>\n"+escapeHTML(shortenMsg(n.JobURL)),
 			tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(
@@ -163,6 +167,33 @@ func (b *Bot) Notify(ctx context.Context, n worker.Notification) {
 				),
 			),
 		)
+	}
+}
+
+// editOrSend правит сообщение задания, а при его отсутствии отправляет новое и
+// запоминает id.
+//
+// У заданий, порождённых из плейлиста, TgMessageID не заполняется: CreateJobs
+// проставляет только источник и чат. Из-за этого ветки уведомлений выходили
+// раньше времени, и о недоступных роликах пользователь не узнавал вовсе —
+// приходили карточки уцелевших, а по упавшим ни сообщения об ошибке, ни кнопки
+// «Повторить»; увидеть их можно было только через веб.
+//
+// Id сохраняется, чтобы следующие уведомления по тому же заданию правили это
+// сообщение, а не сыпали новыми: повторов у задания бывает много.
+func (b *Bot) editOrSend(ctx context.Context, n worker.Notification, text string, kb tgbotapi.InlineKeyboardMarkup) {
+	if n.MessageID != 0 {
+		b.editMsg(n.ChatID, int(n.MessageID), text, kb)
+		return
+	}
+	if n.ChatID == 0 {
+		return
+	}
+	msgID := b.sendMarkup(n.ChatID, text, &kb)
+	if msgID != 0 && n.JobID != "" {
+		if err := b.jobs.SetTgMessageID(ctx, n.JobID, msgID); err != nil {
+			slog.Warn("bot: сохранение id сообщения", "job", n.JobID, "err", err)
+		}
 	}
 }
 
@@ -247,12 +278,32 @@ func (b *Bot) Start(ctx context.Context) {
 			if !ok {
 				return
 			}
+			// Обработчики идут в горутинах, поэтому паника в любом из них
+			// уносила весь процесс — вместе с веб-интерфейсом, пулом загрузок
+			// и активными скачиваниями. Ошибка одного сообщения не должна
+			// стоить работающих загрузок.
 			if update.Message != nil {
-				go b.handleMessage(ctx, update.Message)
+				msg := update.Message
+				go func() {
+					defer recoverUpdate("message")
+					b.handleMessage(ctx, msg)
+				}()
 			} else if update.CallbackQuery != nil {
-				go b.handleCallback(ctx, update.CallbackQuery)
+				cq := update.CallbackQuery
+				go func() {
+					defer recoverUpdate("callback")
+					b.handleCallback(ctx, cq)
+				}()
 			}
 		}
+	}
+}
+
+// recoverUpdate гасит панику обработчика обновления.
+func recoverUpdate(kind string) {
+	if r := recover(); r != nil {
+		slog.Error("bot: паника в обработчике обновления",
+			"kind", kind, "panic", r, "stack", string(debug.Stack()))
 	}
 }
 

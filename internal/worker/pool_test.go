@@ -394,3 +394,52 @@ func TestPool_NotifiesRetry(t *testing.T) {
 		t.Errorf("уведомления = %v, ожидалось завершение NotifJobRetrying", kinds)
 	}
 }
+
+// TestReserveFreePath_KeepsExistingFile проверяет, что совпадение заголовков не
+// уничтожает ранее скачанный файл. Раньше путь собирался прямо из заголовка, и
+// os.Rename молча затирал чужое содержимое: два ролика с одинаковым названием —
+// и первый потерян безвозвратно.
+func TestReserveFreePath_KeepsExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "Интервью.mp4")
+	if err := os.WriteFile(existing, []byte("первое видео"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := reserveFreePath(dir, "Интервью.mp4")
+	if err != nil {
+		t.Fatalf("reserveFreePath: %v", err)
+	}
+	if got == existing {
+		t.Fatal("занят путь уже существующего файла — содержимое было бы затёрто")
+	}
+	if want := filepath.Join(dir, "Интервью (2).mp4"); got != want {
+		t.Errorf("подобрано %q, ожидалось %q", got, want)
+	}
+
+	data, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatalf("исходный файл пропал: %v", err)
+	}
+	if string(data) != "первое видео" {
+		t.Errorf("исходный файл изменён: %q", data)
+	}
+}
+
+// TestReserveFreePath_Unique проверяет, что имя занимается, а не только
+// проверяется: два подряд вызова обязаны дать разные пути, иначе два воркера
+// увели бы один и тот же файл.
+func TestReserveFreePath_Unique(t *testing.T) {
+	dir := t.TempDir()
+	seen := map[string]bool{}
+	for i := 0; i < 5; i++ {
+		p, err := reserveFreePath(dir, "clip.mp4")
+		if err != nil {
+			t.Fatalf("вызов %d: %v", i, err)
+		}
+		if seen[p] {
+			t.Fatalf("путь %q выдан дважды", p)
+		}
+		seen[p] = true
+	}
+}

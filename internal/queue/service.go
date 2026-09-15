@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"sync"
 
 	"github.com/dr-duke/talmorGo/internal/model"
 	"github.com/dr-duke/talmorGo/internal/playlist"
@@ -53,9 +54,41 @@ type Service struct {
 	Hub      *sse.Hub
 
 	observer ExpandObserver
+
+	// resolving — прерыватели идущих проверок на плейлист, по id заготовки.
+	// Service собирается литералом, поэтому карта создаётся лениво.
+	mu        sync.Mutex
+	resolving map[string]context.CancelFunc
 }
 
 func (s *Service) SetObserver(o ExpandObserver) { s.observer = o }
+
+func (s *Service) trackResolve(id string, cancel context.CancelFunc) {
+	s.mu.Lock()
+	if s.resolving == nil {
+		s.resolving = make(map[string]context.CancelFunc)
+	}
+	s.resolving[id] = cancel
+	s.mu.Unlock()
+}
+
+func (s *Service) untrackResolve(id string) {
+	s.mu.Lock()
+	delete(s.resolving, id)
+	s.mu.Unlock()
+}
+
+// cancelResolve прерывает идущую проверку на плейлист. Без неё процесс yt-dlp
+// после отмены жил бы до своего дедлайна впустую.
+func (s *Service) cancelResolve(id string) {
+	s.mu.Lock()
+	fn, ok := s.resolving[id]
+	delete(s.resolving, id)
+	s.mu.Unlock()
+	if ok {
+		fn()
+	}
+}
 
 // ErrInvalidURL — строка не является ссылкой.
 var ErrInvalidURL = fmt.Errorf("invalid url")
@@ -78,8 +111,13 @@ func (s *Service) Prepare(ctx context.Context, rawURL, source string, chatID int
 // pending, плейлист превращается в набор отдельных заданий.
 func (s *Service) Resolve(job *model.Job) {
 	opts := s.Settings.ProbeOptions(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	s.trackResolve(job.ID, cancel)
 	go func() {
-		ctx := context.Background()
+		defer func() {
+			s.untrackResolve(job.ID)
+			cancel()
+		}()
 		res := s.Expander.ResolvePlaceholder(ctx, job.ID, job.URL, opts, job.Source, job.ChatID)
 		s.Pool.Enqueue()
 
@@ -128,7 +166,14 @@ func (s *Service) Cancel(ctx context.Context, id string) error {
 	if s.Pool.CancelJob(id) {
 		return nil
 	}
-	return s.Jobs.Cancel(ctx, id)
+	// Порядок важен: сначала фиксируем отмену в БД. ConfirmSingle и
+	// DeleteChecking работают только по строке в статусе checking, поэтому
+	// после этого разворачивание уже ничего не создаст, даже если успеет
+	// дочитать ответ. Раньше отмена заготовки лишь меняла статус, а фоновое
+	// разворачивание шло своим чередом и заводило сотню заданий вопреки ей.
+	err := s.Jobs.Cancel(ctx, id)
+	s.cancelResolve(id)
+	return err
 }
 
 // CancelAll отменяет все активные задания, включая идущие сейчас загрузки:

@@ -22,5 +22,5 @@ func (h *LinkHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("download") == "true" {
 		setAttachment(w, item.Name)
 	}
-	http.ServeFile(w, r, item.Path)
+	serveMediaFile(w, r, item.Path, item.Name)
 }

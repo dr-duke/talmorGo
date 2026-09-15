@@ -15,8 +15,19 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// tgMessageLimit — предел длины сообщения Telegram в символах. Сообщение
+// длиннее отвергается целиком, и пользователь не получает ничего.
+const tgMessageLimit = 4096
+
+// queueListBudget — запас под заголовок и хвост «и ещё N».
+const queueListBudget = tgMessageLimit - 600
+
 func (b *Bot) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
-	if !b.isAllowed(msg.Chat.ID) {
+	var senderID int64
+	if msg.From != nil {
+		senderID = msg.From.ID
+	}
+	if !b.isAllowed(msg.Chat.ID, senderID) {
 		b.send(msg.Chat.ID, "🛑 This bot is private")
 		return
 	}
@@ -88,7 +99,16 @@ func (b *Bot) handleQueue(ctx context.Context, chatID int64) {
 	}
 	var sb strings.Builder
 	sb.WriteString("📋 <b>Активные задачи:</b>\n")
-	for _, j := range jobs {
+
+	// Считаем бюджет в байтах, а не строки. Раньше список склеивался целиком:
+	// на плейлисте из ста роликов сообщение переваливало за 10 КБ, Telegram
+	// отвергал его целиком, и в чате не появлялось ничего — бот выглядел
+	// замолчавшим именно тогда, когда очередь интереснее всего. Ограничения по
+	// числу строк тут не хватает: escapeHTML раздувает «&» в пять символов,
+	// поэтому длина считается по факту. Строки добавляются целиком, так что
+	// разметка остаётся корректной.
+	remaining := 0
+	for i, j := range jobs {
 		status := "⏳"
 		switch j.Status {
 		case model.JobRunning:
@@ -104,7 +124,15 @@ func (b *Bot) handleQueue(ctx context.Context, chatID int64) {
 		if j.Title != "" {
 			name = j.Title
 		}
-		sb.WriteString(fmt.Sprintf("%s <code>%s</code> %s\n", status, shortID, escapeHTML(shortenURL(name))))
+		line := fmt.Sprintf("%s <code>%s</code> %s\n", status, shortID, escapeHTML(shortenURL(name)))
+		if sb.Len()+len(line) > queueListBudget {
+			remaining = len(jobs) - i
+			break
+		}
+		sb.WriteString(line)
+	}
+	if remaining > 0 {
+		sb.WriteString(fmt.Sprintf("\n…и ещё %d в очереди", remaining))
 	}
 	b.send(chatID, sb.String())
 }
@@ -175,7 +203,19 @@ func (b *Bot) OnExpanded(ctx context.Context, ev queue.ExpandEvent) {
 
 // handleCallback обрабатывает нажатие inline-кнопок.
 func (b *Bot) handleCallback(ctx context.Context, cq *tgbotapi.CallbackQuery) {
-	if !b.isAllowed(cq.From.ID) {
+	// Message у callback опционален: в библиотеке это указатель, и безусловное
+	// разыменование роняло весь процесс вместе с веб-интерфейсом и идущими
+	// загрузками.
+	if cq.Message == nil {
+		b.answerCallback(cq.ID, "Сообщение недоступно")
+		return
+	}
+
+	var fromID int64
+	if cq.From != nil {
+		fromID = cq.From.ID
+	}
+	if !b.isAllowed(fromID, cq.Message.Chat.ID) {
 		b.answerCallback(cq.ID, "🛑 Доступ запрещён")
 		return
 	}
@@ -345,12 +385,28 @@ func escapeHTML(s string) string {
 	return s
 }
 
-func (b *Bot) isAllowed(chatID int64) bool {
+// isAllowed пускает, если в списке разрешённых есть хотя бы один из переданных
+// идентификаторов.
+//
+// Раньше сообщения проверялись по Chat.ID, а нажатия кнопок — по From.ID. В
+// личной переписке это одно и то же число, поэтому расхождение не было видно; в
+// группе они разные. Бот, добавленный в группу, чей chat_id внесён в список
+// (как и предписывает спецификация), обрабатывал сообщения, но на любое
+// нажатие кнопки отвечал «доступ запрещён». Зеркально: со личными id в списке
+// в группе работали кнопки, но не сообщения.
+//
+// Предупреждение о пустом списке печатается один раз при старте, а не на
+// каждое сообщение (см. Bot.New).
+func (b *Bot) isAllowed(ids ...int64) bool {
 	if len(b.cfg.TelegramAllowedIDs) == 0 {
-		slog.Warn("bot: TELEGRAM_ALLOWED_IDS not set — all users allowed")
 		return true
 	}
-	return slices.Contains(b.cfg.TelegramAllowedIDs, chatID)
+	for _, id := range ids {
+		if id != 0 && slices.Contains(b.cfg.TelegramAllowedIDs, id) {
+			return true
+		}
+	}
+	return false
 }
 
 func shortenURL(u string) string {

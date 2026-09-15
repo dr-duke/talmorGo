@@ -160,12 +160,34 @@ func migrate(db *sql.DB) error {
 		if err != nil {
 			return fmt.Errorf("read %s: %w", name, err)
 		}
-		if _, err := db.Exec(string(data)); err != nil {
-			return fmt.Errorf("exec %s: %w", name, err)
+		if err := applyMigration(db, name, string(data)); err != nil {
+			return err
 		}
-		if _, err := db.Exec(`INSERT INTO schema_migrations (name) VALUES (?)`, name); err != nil {
-			return fmt.Errorf("record migration %s: %w", name, err)
-		}
+	}
+	return nil
+}
+
+// applyMigration применяет файл миграции и отметку о нём одной транзакцией.
+// Раздельные Exec оставляли бы окно, в котором миграция уже применена, а
+// отметка ещё нет: обрыв в этот момент (перезапуск, OOM, вытеснение) приводил
+// к повторному прогону на следующем старте, а миграции неидемпотентны —
+// приложение переставало запускаться. DDL в SQLite транзакционен, поэтому
+// откат снимает и структурные изменения.
+func applyMigration(db *sql.DB, name, body string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin %s: %w", name, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // после Commit это no-op
+
+	if _, err := tx.Exec(body); err != nil {
+		return fmt.Errorf("exec %s: %w", name, err)
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (name) VALUES (?)`, name); err != nil {
+		return fmt.Errorf("record migration %s: %w", name, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit %s: %w", name, err)
 	}
 	return nil
 }
