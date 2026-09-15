@@ -77,6 +77,14 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
+	// Бинаря yt-dlp в тестах нет: проверка плейлиста не удаётся, и ссылка
+	// трактуется как одиночное видео — ровно тот путь, который здесь нужен.
+	return newEnvBin(t, "")
+}
+
+// newEnvBin позволяет подставить бинарь-заглушку, чтобы пройти плейлистный путь.
+func newEnvBin(t *testing.T, binary string) *env {
+	t.Helper()
 	dir := t.TempDir()
 	database, err := db.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
@@ -84,10 +92,11 @@ func newEnv(t *testing.T) *env {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	// Бинаря yt-dlp в тестах нет: проверка плейлиста не удаётся, и ссылка
-	// трактуется как одиночное видео — ровно тот путь, который здесь нужен.
+	if binary == "" {
+		binary = filepath.Join(dir, "no-such-yt-dlp")
+	}
 	cfg := &config.Config{
-		YtDlpBinary:    filepath.Join(dir, "no-such-yt-dlp"),
+		YtDlpBinary:    binary,
 		YtDlpOutputDir: dir,
 		YtDlpTimeout:   5,
 	}
@@ -266,5 +275,76 @@ func TestRecoverChecking(t *testing.T) {
 	got, _ := e.jobs.GetByID(ctx, stale.ID)
 	if got.Status != model.JobPending {
 		t.Errorf("recovered job status = %s, want pending", got.Status)
+	}
+}
+
+// stubPlaylistBinary кладёт заглушку yt-dlp, отдающую плейлист из двух видео
+// в формате --flat-playlist (три строки на запись). Пауза перед выводом даёт
+// тесту успеть нажать «Отменить», пока идёт проверка.
+func stubPlaylistBinary(t *testing.T, delay string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "yt-dlp-stub.sh")
+	script := "#!/bin/sh\nsleep " + delay + "\n" +
+		"echo https://example.com/a\necho 'Видео A'\necho 'Сборник'\n" +
+		"echo https://example.com/b\necho 'Видео B'\necho 'Сборник'\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestCancelDuringChecking_NoJobsCreated: отмена во время проверки должна
+// останавливать разворачивание. Раньше отмена лишь меняла статус заготовки, а
+// фоновая горутина всё равно доходила до конца и заводила задание на каждое
+// видео — пользователь отменял ссылку на плейлист и через пару секунд получал
+// полную очередь.
+func TestCancelDuringChecking_NoJobsCreated(t *testing.T) {
+	e := newEnvBin(t, stubPlaylistBinary(t, "1"))
+	ctx := context.Background()
+
+	job, err := e.svc.Add(ctx, "https://example.com/playlist", "web", 0)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := e.svc.Cancel(ctx, job.ID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+
+	e.waitExpanded(t)
+
+	all, err := e.jobs.List(ctx, repo.JobFilter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, j := range all {
+		if j.ID != job.ID {
+			t.Errorf("после отмены создано задание %s (%s)", j.ID, j.URL)
+		}
+	}
+
+	got, err := e.jobs.GetByID(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != model.JobCancelled {
+		t.Errorf("статус заготовки = %s, ожидался cancelled", got.Status)
+	}
+}
+
+// TestPlaylistExpandsWhenNotCancelled — контрольный: без отмены тот же путь
+// обязан развернуть плейлист, иначе предыдущий тест проходил бы впустую.
+func TestPlaylistExpandsWhenNotCancelled(t *testing.T) {
+	e := newEnvBin(t, stubPlaylistBinary(t, "0"))
+	ctx := context.Background()
+
+	if _, err := e.svc.Add(ctx, "https://example.com/playlist", "web", 0); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	ev := e.waitExpanded(t)
+	if !ev.IsPlaylist {
+		t.Fatal("плейлист не распознан — заглушка не сработала")
+	}
+	if ev.Created != 2 {
+		t.Errorf("создано заданий: %d, ожидалось 2", ev.Created)
 	}
 }

@@ -112,3 +112,65 @@ func TestInsertViolatingForeignKey(t *testing.T) {
 		t.Error("insert with dangling job_id must fail")
 	}
 }
+
+// TestApplyMigration_RollsBackOnError проверяет, что упавшая миграция не
+// оставляет после себя половину изменений и не отмечается применённой.
+// Раньше тело файла и отметка выполнялись раздельными Exec, и обрыв между ними
+// делал базу незапускаемой: повторный прогон неидемпотентной миграции падал на
+// уже применённом операторе, а до этого успевал удалить таблицу токенов.
+func TestApplyMigration_RollsBackOnError(t *testing.T) {
+	d, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	// Первый оператор проходит, второй падает — ровно как в 012, где перед
+	// падающим ALTER идут разрушительные DROP TABLE.
+	const body = `CREATE TABLE half_applied (id TEXT);
+	              ALTER TABLE jobs DROP COLUMN nonexistent_column;`
+
+	if err := applyMigration(d.write, "999_broken.sql", body); err == nil {
+		t.Fatal("ожидалась ошибка миграции, получен успех")
+	}
+
+	var tables int
+	if err := d.write.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='half_applied'`,
+	).Scan(&tables); err != nil {
+		t.Fatal(err)
+	}
+	if tables != 0 {
+		t.Error("таблица из упавшей миграции уцелела — транзакция не откатилась")
+	}
+
+	var marked int
+	if err := d.write.QueryRow(
+		`SELECT COUNT(*) FROM schema_migrations WHERE name='999_broken.sql'`,
+	).Scan(&marked); err != nil {
+		t.Fatal(err)
+	}
+	if marked != 0 {
+		t.Error("упавшая миграция отмечена как применённая")
+	}
+}
+
+// TestMigrate_Idempotent проверяет, что повторный прогон на уже мигрированной
+// базе проходит без ошибок: именно этот путь ломался после обрыва.
+func TestMigrate_Idempotent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(d.write); err != nil {
+		t.Fatalf("повторная миграция на той же базе: %v", err)
+	}
+	d.Close()
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("повторное открытие уже мигрированной базы: %v", err)
+	}
+	again.Close()
+}

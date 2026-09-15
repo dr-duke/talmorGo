@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,7 +60,10 @@ func TestRun_FakeBinary(t *testing.T) {
 	}
 }
 
-// TestRun_Timeout проверяет, что процесс убивается по таймауту.
+// TestRun_Timeout проверяет, что истёкший таймаут доходит до вызывающего
+// ошибкой. Раньше он попадал в ту же ветку, что и отмена пользователем, и
+// наверх не уходило ничего: пул видел «ни файлов, ни ошибки» и записывал
+// заданию «готово» — с пустой медиатекой и без права на повтор.
 func TestRun_Timeout(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "slow.sh")
@@ -73,16 +77,68 @@ func TestRun_Timeout(t *testing.T) {
 		Timeout:   100 * time.Millisecond,
 	}
 
-	ctx := context.Background()
-	ch := downloader.Run(ctx, "https://example.com/slow", opts)
+	done := make(chan struct{})
+	var errs []error
+	go func() {
+		defer close(done)
+		for e := range downloader.Run(context.Background(), "https://example.com/slow", opts) {
+			if e.Err != nil {
+				errs = append(errs, e.Err)
+			}
+		}
+	}()
 
-	var errCount int
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("канал не закрылся: процесс не был остановлен по таймауту")
+	}
+
+	if len(errs) == 0 {
+		t.Fatal("таймаут не сообщён наверх — задание получило бы статус «готово»")
+	}
+	if !strings.Contains(errs[0].Error(), "таймаут") {
+		t.Errorf("ошибка не опознаётся как таймаут: %v", errs[0])
+	}
+}
+
+// TestRun_CancelStaysSilent проверяет обратное: отмена вызывающим ошибкой не
+// считается, иначе отменённое задание уходило бы в повтор вместо «отменено».
+// Отменяем только после фактического запуска процесса — отмена до старта даёт
+// законную ошибку "start: context canceled", и пул её не увидит, потому что
+// проверяет отмену раньше ветки с ошибкой.
+func TestRun_CancelStaysSilent(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "started")
+	scriptPath := filepath.Join(dir, "slow.sh")
+	script := "#!/bin/sh\ntouch " + marker + "\nsleep 60\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := downloader.Run(ctx, "https://example.com/slow", downloader.Options{
+		Binary:    scriptPath,
+		OutputDir: dir,
+		Timeout:   30 * time.Second,
+	})
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("процесс так и не стартовал")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+
 	for e := range ch {
 		if e.Err != nil {
-			errCount++
+			t.Errorf("отмена сообщена как ошибка загрузки: %v", e.Err)
 		}
 	}
-	// Ошибка таймаута не пробрасывается как Event (ctx.Err() != nil), процесс просто убивается.
-	// Канал должен закрыться без зависания.
-	_ = errCount
 }

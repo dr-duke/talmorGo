@@ -2,13 +2,15 @@
 
 let timer;
 
-export function showToast(msg) {
+export function showToast(msg, isError = false) {
   const el = document.getElementById('toast');
   if (!el) return;
   el.textContent = msg;
+  el.classList.toggle('toast-error', isError);
   el.classList.add('visible');
   clearTimeout(timer);
-  timer = setTimeout(() => el.classList.remove('visible'), 2800);
+  // Ошибку держим дольше: её текст длиннее и его нужно успеть прочитать.
+  timer = setTimeout(() => el.classList.remove('visible'), isError ? 6000 : 2800);
 }
 
 // Сервер может попросить показать уведомление заголовком HX-Trigger.

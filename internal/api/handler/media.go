@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -106,7 +107,7 @@ func (h *MediaHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("download") == "true" {
 		setAttachment(w, item.Name)
 	}
-	http.ServeFile(w, r, item.Path)
+	serveMediaFile(w, r, item.Path, item.Name)
 }
 
 // setAttachment выставляет заголовок скачивания с корректным экранированием:
@@ -114,6 +115,37 @@ func (h *MediaHandler) Stream(w http.ResponseWriter, r *http.Request) {
 func setAttachment(w http.ResponseWriter, name string) {
 	w.Header().Set("Content-Disposition",
 		mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+}
+
+// safeMediaTypes — белый список типов, которые разрешено отдавать как есть.
+// Всё остальное уходит потоком октетов: браузер его не исполняет.
+var safeMediaTypes = map[string]string{
+	".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+	".mkv": "video/x-matroska", ".mov": "video/quicktime",
+	".avi": "video/x-msvideo", ".ts": "video/mp2t", ".flv": "video/x-flv",
+	".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".opus": "audio/opus",
+	".ogg": "audio/ogg", ".oga": "audio/ogg", ".flac": "audio/flac",
+	".wav": "audio/wav", ".aac": "audio/aac",
+}
+
+// serveMediaFile отдаёт файл медиатеки, не позволяя браузеру счесть его
+// страницей.
+//
+// http.ServeFile определяет тип по расширению, а расширение задаёт
+// пользователь: переименовав элемент в .html, можно было получить исполняемый
+// документ на origin приложения — в том числе по публичной ссылке /f/{token},
+// где авторизация не требуется вовсе. Скрипт оттуда ходил бы по API от имени
+// вошедшего пользователя. Поэтому тип берётся из белого списка, угадывание
+// запрещено, а Referer не утекает вместе с токеном ссылки.
+func serveMediaFile(w http.ResponseWriter, r *http.Request, path, name string) {
+	ctype, ok := safeMediaTypes[strings.ToLower(filepath.Ext(name))]
+	if !ok {
+		ctype = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	http.ServeFile(w, r, path)
 }
 
 func (h *MediaHandler) Delete(w http.ResponseWriter, r *http.Request) {

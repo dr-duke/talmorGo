@@ -68,7 +68,10 @@ type JobRepo interface {
 	Cancel(ctx context.Context, id string) error
 	CancelAll(ctx context.Context) (int64, error)
 	ConfirmSingle(ctx context.Context, id string) error
-	DeleteChecking(ctx context.Context, id string) error
+	// DeleteChecking удаляет заготовку, только пока она в статусе checking.
+	// Признак удаления показывает, не отменил ли пользователь задание, пока шла
+	// проверка: если строки уже нет, разворачивать плейлист не нужно.
+	DeleteChecking(ctx context.Context, id string) (bool, error)
 	// ListChecking возвращает задания, зависшие на проверке плейлиста после рестарта.
 	ListChecking(ctx context.Context) ([]*model.Job, error)
 	Hide(ctx context.Context, id string) error
@@ -99,8 +102,9 @@ type TagRepo interface {
 	AddToJob(ctx context.Context, jobID, tagID string) error
 	BulkAddToJobs(ctx context.Context, tagID string, jobIDs []string) error
 	RemoveFromJob(ctx context.Context, jobID, tagName string) error
-	// PruneOrphans удаляет оборванные job_tags, пустые теги и пустые коллекции.
-	// Возвращает количество удалённых: привязок, тегов, коллекций.
+	// PruneOrphans удаляет оборванные job_tags и пустые теги. Сами коллекции не
+	// трогает: это пользовательская сущность, и пустая подборка — не мусор.
+	// Возвращает количество удалённых: привязок, тегов, коллекций (всегда 0).
 	PruneOrphans(ctx context.Context) (nJobTags, nTags, nCollections int, err error)
 }
 

@@ -37,6 +37,16 @@ func main() {
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
+	// Пустой WEB_TOKEN полностью отключает проверку доступа — и раньше делал
+	// это молча. Для TELEGRAM_ALLOWED_IDS предупреждение спецификацией
+	// предусмотрено, а для веб-пароля не было ни в коде, ни в документации:
+	// выкатив экземпляр за Ingress и забыв переменную, человек получал
+	// открытый интерфейс с удалением файлов и настройками, не узнав об этом.
+	if cfg.WebToken == "" {
+		slog.Warn("WEB_TOKEN не задан — веб-интерфейс открыт без авторизации: " +
+			"доступны удаление файлов, постоянные ссылки и настройки")
+	}
+
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		slog.Error("db open", "path", cfg.DBPath, "err", err)
@@ -100,10 +110,7 @@ func main() {
 		Cfg: cfg, Lib: libSvc, Queue: queueSvc,
 		Settings: settingsProvider, Cookies: cookieRepo, Hub: hub,
 	})
-	httpServer := &http.Server{
-		Addr:    cfg.HTTPHost + ":" + cfg.HTTPPort,
-		Handler: srv.Handler(),
-	}
+	httpServer := newHTTPServer(cfg.HTTPHost+":"+cfg.HTTPPort, srv.Handler())
 
 	checker := worker.NewFileChecker(itemRepo, cfg.FileCheckInterval)
 	dirScanner := worker.NewDirScanner(jobRepo, itemRepo, cfg.YtDlpOutputDir, cfg.DirScanInterval, pool.InFlight())

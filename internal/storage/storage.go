@@ -35,7 +35,24 @@ func (s *Storage) Rename(oldPath, newName string) (string, error) {
 		return "", err
 	}
 	newPath := filepath.Join(filepath.Dir(oldPath), newName)
+	if newPath == oldPath {
+		return newPath, nil
+	}
+	// Имя занимаем атомарным созданием файла. os.Rename молча затирает то, что
+	// лежит по назначению: переименование одного файла в имя другого
+	// уничтожало второй, а отказ базы по уникальности пути приходил уже после
+	// необратимой правки диска — портились сразу два элемента.
+	f, err := os.OpenFile(newPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return "", fmt.Errorf("файл с именем %q уже есть в медиатеке", newName)
+		}
+		return "", fmt.Errorf("rename %s → %s: %w", oldPath, newPath, err)
+	}
+	f.Close() //nolint:errcheck // заглушку тут же заменит перенос
+
 	if err := os.Rename(oldPath, newPath); err != nil {
+		os.Remove(newPath) //nolint:errcheck // снимаем заглушку
 		return "", fmt.Errorf("rename %s → %s: %w", oldPath, newPath, err)
 	}
 	return newPath, nil

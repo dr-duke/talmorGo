@@ -127,16 +127,13 @@ func (r *sqliteTagRepo) PruneOrphans(ctx context.Context) (nJobTags, nTags, nCol
 	if nTags, err = exec(`DELETE FROM tags WHERE kind='plain' AND id NOT IN (SELECT DISTINCT tag_id FROM job_tags)`); err != nil {
 		return
 	}
-	// 3. коллекции без активных заданий
-	if nCollections, err = exec(`
-		DELETE FROM collections WHERE id NOT IN (
-			SELECT DISTINCT c.id FROM collections c
-			JOIN tags t ON t.name = c.name
-			JOIN job_tags jt ON jt.tag_id = t.id
-			JOIN jobs j ON j.id = jt.job_id
-		)`); err != nil {
-		return
-	}
+	// 3. Коллекции не трогаем. Раньше здесь удалялись коллекции без заданий —
+	// но Create заводит коллекцию вообще без тега (тег появляется только в
+	// AddJobs), поэтому под условие подпадала любая только что созданная
+	// пустая подборка: пользователь заводил её, нажимал «Переиндексировать» и
+	// терял без единого сообщения. Коллекция — пользовательская сущность, а не
+	// мусор: пустую удаляет только сам пользователь.
+	nCollections = 0
 	// 4. collection-теги без соответствующей записи в collections
 	n, e := exec(`DELETE FROM tags WHERE kind='collection' AND name NOT IN (SELECT name FROM collections)`)
 	nTags += n
