@@ -103,6 +103,7 @@ function openVideo(stream, title) {
   const video = el('main-player');
   if (!video) return;
 
+  applyFullscreenLayout();
   video.src = stream;
   // showModal бросает исключение, если окно уже открыто.
   if (!dlg.open) dlg.showModal();
@@ -264,9 +265,34 @@ function seek(event) {
 
 // ── Инициализация ────────────────────────────────────────────────────────────
 
+// Телефон в горизонтальной ориентации: широкий и низкий экран с сенсорным вводом.
+// Считаем это в JS, а не только медиазапросом: так признак виден в отладке и не
+// зависит от того, как конкретный браузер трактует pointer/max-height.
+function isPhoneLandscape() {
+  const landscape = window.innerWidth > window.innerHeight;
+  const short = window.innerHeight <= 600;
+  // Сенсорность спрашиваем у медиазапроса: navigator.maxTouchPoints в WebKit
+  // возвращает 0 даже на мобильном, и проверка по нему молча не срабатывала.
+  const touch = window.matchMedia('(pointer: coarse)').matches
+    || (navigator.maxTouchPoints || 0) > 0;
+  return landscape && short && touch;
+}
+
+// applyFullscreenLayout включает разметку «во весь экран» для окна плеера.
+function applyFullscreenLayout() {
+  const dlg = el('player-dialog');
+  if (!dlg) return;
+  dlg.classList.toggle('is-fullscreen', isPhoneLandscape());
+}
+
 function initDialog() {
   const dlg = el('player-dialog');
   if (!dlg) return;
+
+  // Поворот телефона меняет раскладку на лету, в том числе при открытом плеере.
+  applyFullscreenLayout();
+  window.addEventListener('resize', applyFullscreenLayout);
+  window.addEventListener('orientationchange', () => setTimeout(applyFullscreenLayout, 300));
 
   // Escape сворачивает в панель, а не останавливает воспроизведение.
   dlg.addEventListener('cancel', (e) => {

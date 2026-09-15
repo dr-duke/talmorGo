@@ -75,6 +75,14 @@ func TestCancelDuringDownload(t *testing.T) {
 		chromedp.Navigate(baseURL+"/"),
 		chromedp.WaitNotPresent(`#media-loading`, chromedp.ByID),
 	)
+
+	// Сценарий проверяет, что прерванная загрузка не оставила ни файла, ни записи,
+	// поэтому посторонние строки в медиатеке сделали бы вывод бессмысленным.
+	var existingRows int
+	s.eval(`document.querySelectorAll('.media-row').length`, &existingRows)
+	if existingRows > 0 {
+		t.Skipf("в медиатеке уже %d строк — сценарию отмены нужен чистый экземпляр", existingRows)
+	}
 	s.step("ссылка поставлена в очередь",
 		chromedp.SendKeys(`.header-add-form input[name="url"]`, testVideoURL, chromedp.ByQuery),
 		chromedp.Click(`.header-add-form button[type="submit"]`, chromedp.ByQuery),
