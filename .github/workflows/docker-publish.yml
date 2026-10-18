@@ -6,6 +6,8 @@ on:
     tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ "main" ]
+  # пересборка руками: старые прогоны GitHub через месяц не перезапускает
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -51,6 +53,8 @@ jobs:
   build:
     needs: [test, e2e]
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build-and-push.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -113,3 +117,48 @@ jobs:
           TAGS: ${{ steps.meta.outputs.tags }}
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
         run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
+
+  # Релизный тег → pull request в home-lab (Forgejo) с новым digest образа.
+  # Выкат в кластер делает Ansible из home-lab после слияния PR; здесь только
+  # правка talmorgo_image_digest в ansible/inventory.yml через API contents.
+  homelab-pr:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    env:
+      HOME_LAB_API: ${{ secrets.HOME_LAB_API }}
+      HOME_LAB_TOKEN: ${{ secrets.HOME_LAB_TOKEN }}
+      DIGEST: ${{ needs.build.outputs.digest }}
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - name: Открыть PR в home-lab
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, re, sys, urllib.request, urllib.error
+          api = os.environ["HOME_LAB_API"].rstrip("/")
+          repo = "dr_duke/home-lab"; path = "ansible/inventory.yml"
+          version = os.environ["VERSION"].lstrip("v"); digest = os.environ["DIGEST"].split(":")[1]
+          branch = "app/talmorgo-" + version
+          hdr = {"Authorization": "token " + os.environ["HOME_LAB_TOKEN"], "Content-Type": "application/json"}
+          def call(method, url, body=None):
+              req = urllib.request.Request(api + url, method=method, headers=hdr,
+                                           data=json.dumps(body).encode() if body is not None else None)
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as r: return json.load(r)
+              except urllib.error.HTTPError as e:
+                  sys.exit("%s %s -> %s %s" % (method, url, e.code, e.read().decode()[:300]))
+          cur = call("GET", "/repos/%s/contents/%s?ref=main" % (repo, path))
+          text = base64.b64decode(cur["content"]).decode()
+          new, n = re.subn(r'(talmorgo_image_digest: ")[0-9a-f]{64}(".*)', r'\g<1>' + digest + r'"  # v' + version, text, count=1)
+          if n != 1: sys.exit("talmorgo_image_digest не найден")
+          if new == text: print("digest уже такой, PR не нужен"); sys.exit(0)
+          call("PUT", "/repos/%s/contents/%s" % (repo, path), {
+              "branch": "main", "new_branch": branch, "sha": cur["sha"],
+              "content": base64.b64encode(new.encode()).decode(),
+              "message": "talmorgo: выкат %s\n\nОбраз ghcr.io/dr-duke/talmorgo:%s\nsha256:%s" % (version, version, digest)})
+          pr = call("POST", "/repos/%s/pulls" % repo, {
+              "head": branch, "base": "main", "title": "talmorgo: выкат " + version,
+              "body": "Собрано GitHub Actions из тега v%s.\n\nОбраз `ghcr.io/dr-duke/talmorgo:%s`\n`sha256:%s`\n\n"
+                      "После слияния: `play_single_app.yml -e target_app_name=talmorgo` и `talmorgo-private`." % (version, version, digest)})
+          print("PR:", pr["html_url"])
+          PY
